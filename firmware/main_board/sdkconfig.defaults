@@ -1,0 +1,10 @@
+CONFIG_MEDIA_ENGINE=y
+# Gestures: the MediaPipe palm and hand landmark decoders, models/mediapipe_hand.mipk.
+CONFIG_MIPK_VIDEO=y
+CONFIG_MIPK_EXTRA_MEDIAPIPE_HAND=y
+# Features: see ../../Kconfig.
+CONFIG_DOITDUCK_WEB=y
+CONFIG_DOITDUCK_VOICE=y
+CONFIG_DOITDUCK_GESTURE=y
+# Speech recognition: the mipk wake word, which starts a xiaozhi conversation.
+CONFIG_DOITDUCK_ASR_MIPK_WAKE=y

@@ -1,0 +1,137 @@
+# DoitDuck build options: the features and, for each capability, its
+# implementation. Shared by the hifw build here and, later, an ESP-IDF one.
+
+menu "DoitDuck features"
+
+config DOITDUCK_WEB
+    bool "Web page"
+    default y
+
+config DOITDUCK_GAMEPAD
+    bool "Gamepad (needs a pad reader; none yet)"
+    default n
+
+config DOITDUCK_VOICE
+    bool "Voice: wake word and command words"
+    default y
+
+config DOITDUCK_XIAOZHI
+    bool "xiaozhi: conversations with the LLM, which moves the duck through MCP"
+    default y
+    depends on DOITDUCK_ASR_MIPK_WAKE && DOITDUCK_NET_MBEDTLS
+
+config DOITDUCK_GESTURE
+    bool "Hand gestures from the camera"
+    default y
+
+config DOITDUCK_WIFI
+    bool "Wi-Fi settings on the web page (wpa_supplicant, wlan0)"
+    default y
+
+config DOITDUCK_TOF
+    bool "ToF distance sensor (ST VL53L5CX, 8x8 zones), shown on the web page"
+    default y
+
+endmenu
+
+menu "DoitDuck board"
+
+config DOITDUCK_BOARD
+    string "Board name, as xiaozhi sees it"
+    default "cove610"
+
+config DOITDUCK_ROBOT
+    string "Robot: robots/<name>.json"
+    default "microduck"
+    help
+      microduck: the Microduck frame (Microduck-kissqy prints, Feetech HD1910).
+
+config DOITDUCK_HTTP_PORT
+    int "Web page port"
+    default 80
+
+config DOITDUCK_BUS_DEVICE
+    string "Servo bus UART"
+    default "/dev/ttyAMA1"
+    help
+      On the Cove-610 UART1 exists only with 'sdio1-pins none' (or sd) and a reboot.
+
+config DOITDUCK_BUS_PINMUX
+    string "Pin multiplexing: register=value pairs (at most 8), written when the bus opens"
+    default "0x11130030=0x1105 0x11130034=0x1105 0x1113003C=0x1100 0x11130004=0x1201 0x11130000=0x1201 0x17940090=0x1100 0x17940094=0x1100"
+    help
+      For the bus: UART1 TXD and RXD, and GPIO1_0 (JP2 21) as the bus buffer's TX
+      enable. For the ToF: GPIO1_4 as I2C1_SCL and GPIO1_5 as I2C1_SDA, and I2C1's
+      camera pins (the second camera's, unused) back to GPIO.
+
+config DOITDUCK_BUS_TX_ENABLE_BASE
+    hex "PL061 GPIO controller of the bus buffer's TX enable (low = send)"
+    default 0x11091000
+
+config DOITDUCK_BUS_TX_ENABLE_PIN
+    int "Its pin, or -1 for a buffer that switches by itself"
+    range -1 7
+    default 0
+
+config DOITDUCK_TOF_I2C
+    string "ToF I2C bus"
+    default "/dev/i2c-1"
+    depends on DOITDUCK_TOF
+
+config DOITDUCK_MIC_CHANNEL
+    int "Microphone channel: 0 ADCL, 1 ADCR"
+    range 0 1
+    default 0
+
+config DOITDUCK_MIC_GAIN_DB
+    int "Microphone gain, dB"
+    default 50
+
+config DOITDUCK_SPEAKER_GAIN_DB
+    int "Speaker gain, dB (-121..6)"
+    range -121 6
+    default -10
+
+endmenu
+
+menu "DoitDuck adapters"
+
+choice DOITDUCK_ASR
+    prompt "Speech recognition"
+    default DOITDUCK_ASR_MIPK_WAKE
+
+config DOITDUCK_ASR_MIPK_WAKE
+    bool "mipk: a wake word only, for xiaozhi (models/nihaoxiaoya.mipk)"
+    select MIPK_RUNTIME
+    select MIPK_MODEL_MICROWAKEWORD
+
+config DOITDUCK_ASR_NONE
+    bool "none"
+
+endchoice
+
+choice DOITDUCK_NET
+    prompt "Network (HTTPS, WebSocket)"
+    default DOITDUCK_NET_MBEDTLS
+
+config DOITDUCK_NET_MBEDTLS
+    bool "Mbed TLS"
+
+config DOITDUCK_NET_NONE
+    bool "none"
+
+endchoice
+
+choice DOITDUCK_OPUS
+    prompt "Opus codec"
+    default DOITDUCK_OPUS_LIBOPUS
+
+config DOITDUCK_OPUS_LIBOPUS
+    bool "libopus from the SDK"
+
+config DOITDUCK_OPUS_NONE
+    bool "none"
+
+endchoice
+
+endmenu

@@ -1,0 +1,63 @@
+/* The frame: top bar, navigation at the bottom on a phone and on the left on a wide screen, pages of cards. */
+body { min-height: 100vh; padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+.top {
+  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+  padding: .45rem .7rem; background: var(--card); border-bottom: 1px solid var(--line);
+}
+.top .brand { display: flex; align-items: center; gap: .45rem; font-size: 1.05rem; }
+.top .logo { width: 26px; height: 26px; fill: var(--accent); }
+@media (max-width: 400px) { .top .brand span { display: none; } .top #estop { min-width: 72px; } }
+.top #estop { min-width: 84px; }
+.top #lang { min-height: 34px; padding: 0 .7rem; font-size: .85rem; margin-right: auto; } /* the rest goes right */
+.nav {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: flex;
+  background: var(--card); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom);
+}
+.nav a {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-height: 56px; text-decoration: none; font-size: .78rem; color: var(--muted);
+}
+.nav a svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.nav a.on { color: var(--text); font-weight: 600; }
+.nav a svg { box-sizing: content-box; padding: 3px 14px; border-radius: 999px; transition: background .15s; }
+.nav a.on svg { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+main { padding: .7rem; display: grid; gap: .7rem; max-width: 1200px; margin: 0 auto; }
+/* Cards and stacks space their children evenly; min-width 0 keeps wide children (tables, scrolling bars) inside the screen. */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: .9rem; box-shadow: var(--shadow); }
+.card, .stack, .col { display: grid; gap: .65rem; align-content: start; }
+:where(main, .grid2, .card, .stack, .col) > * { min-width: 0; }
+:where(.card, .stack) > :is(h2, h3, p) { margin: 0; }
+:where(.card, .stack) > :is(button, select, input) { justify-self: start; }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.row > * { min-width: 0; max-width: 100%; }
+.grow { flex: 1; }
+.grid2 { display: grid; gap: .7rem; }
+/* As wide as the page's cards. */
+.banner {
+  margin: .7rem max(.7rem, calc((100% - 1200px) / 2 + .7rem)) 0; padding: .45rem .8rem; border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 14%, var(--card)); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  font-size: .9rem; display: flex; flex-wrap: wrap; gap: .1rem 1.2rem;
+}
+.banner { position: relative; padding-right: 2.6rem; }
+.banner a { padding: .25rem 0; text-decoration: none; }
+.banner .close { position: absolute; top: .2rem; right: .25rem; min-height: 32px; width: 32px; padding: 0; background: transparent;
+  font-size: 1.25rem; line-height: 1; color: var(--muted); }
+.banner a::before { content: "⚠ "; color: var(--warn); }
+/* Diagram beside what it shows, on a wide screen. */
+.split { display: grid; gap: .65rem; }
+
+@media (min-width: 900px) {
+  body { padding-bottom: 0; padding-left: 92px; }
+  .nav { top: 0; right: auto; width: 92px; flex-direction: column; justify-content: flex-start; padding-top: 3.4rem; border-top: 0; border-right: 1px solid var(--line); }
+  .nav a { flex: none; min-height: 72px; }
+  .grid2 { grid-template-columns: 1fr 1fr; align-items: start; }
+  .split { grid-template-columns: 320px 1fr; align-items: start; }
+}
+/* A phone on its side: the control page becomes the two sticks with the camera between. */
+@media (orientation: landscape) and (max-height: 520px) {
+  body { padding-bottom: 0; }
+  .nav { display: none; }
+  .landscape-hide { display: none; }
+  .sticks { position: fixed; inset: 3rem 0 0 0; justify-content: space-between; padding: 1rem 2rem; pointer-events: none; }
+  .sticks > * { pointer-events: auto; }
+}

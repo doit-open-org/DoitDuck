@@ -1,0 +1,25 @@
+#!/bin/sh
+# Wi-Fi at boot, after S51wireless loads the driver: wpa_supplicant with
+# /etc/wireless/wpa_supplicant.conf, and a DHCP client that stays in the background
+# (it keeps trying until the network is there, and renews the lease).
+# The global control socket lets DoitDuck add its hotspot interface (ap0).
+PID=/var/run/wlan0-udhcpc.pid
+
+case "${1:-start}" in
+start)
+    i=0
+    while [ ! -f /var/run/wireless.ready ] && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
+    ifconfig wlan0 up || exit 1
+    pidof wpa_supplicant >/dev/null || wpa_supplicant -B -i wlan0 -Dnl80211 -c /etc/wireless/wpa_supplicant.conf -g /var/run/wpa_global
+    [ -s $PID ] && kill -0 "$(cat $PID)" 2>/dev/null || udhcpc -i wlan0 -b -S -p $PID >/dev/null 2>&1
+    echo "[wifi] started"
+    ;;
+stop)
+    [ -s $PID ] && kill "$(cat $PID)" 2>/dev/null; rm -f $PID
+    wpa_cli -iwlan0 terminate >/dev/null 2>&1
+    echo "[wifi] stopped"
+    ;;
+restart)
+    "$0" stop; sleep 1; "$0" start
+    ;;
+esac

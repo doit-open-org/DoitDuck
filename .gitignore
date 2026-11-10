@@ -1,0 +1,16 @@
+# Motion models are provided by the user (see "模型" in README.md); the voice and gesture models are in the repository.
+/models/*
+!/models/nihaoxiaoya.mipk
+!/models/kaishipeiwang.mipk
+!/models/mediapipe_hand.mipk
+/build/
+/firmware/main_board/build/
+/firmware/main_board/out/
+/firmware/main_board/.config
+# Runtime data, when run from the source tree.
+/data/
+/firmware/imu_board/build*/
+/firmware/imu_board/out/
+/firmware/imu_board/sdkconfig
+/firmware/imu_board/sdkconfig.old
+__pycache__/
