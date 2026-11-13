@@ -54,6 +54,10 @@ function html() {
       <div id="stick-r"><small id="stick-r-label"></small><b id="stick-r-v" class="num">0.00</b></div></div>
     <label class="landscape-hide"><span data-i18n="control.mouth"></span> <b id="mouth-v" class="num">0°</b>
       <input id="mouth" type="range" min="0" max="${info.mouth_max}" step="1" value="0"></label>
+    <div class="landscape-hide"><div class="row"><span class="grow" data-i18n="control.head"></span>
+      <button id="head-center" data-i18n="control.head_center"></button></div>
+      ${['neck', 'pitch', 'yaw', 'roll'].map((k, i) => `<label><span data-i18n="control.head_${k}"></span> <b id="head-v${i}" class="num">0.00</b>
+      <input data-head="${i}" type="range" min="-1" max="1" step="0.05" value="0"></label>`).join('')}</div>
     <p class="muted landscape-hide keys-hint" data-i18n="control.keys"></p>
   </section></div>`;
 }
@@ -169,6 +173,11 @@ function render(s) {
   $('#c-imu').classList.toggle('bad', !s.imu_ok);
   $('#c-batt').textContent = s.battery_v ? s.battery_v.toFixed(2) + ' V' : '—';
   $('#c-batt').classList.toggle('bad', s.battery_v > 0 && s.battery_v < 6.8);
+  // The head sliders show where the head is (the stick and gestures move it too), except the one being dragged.
+  el.querySelectorAll('[data-head]').forEach((r, i) => {
+    if (s.head && !r.matches(':active')) r.value = s.head[i];
+    $('#head-v' + i).textContent = (+r.value).toFixed(2);
+  });
   if ($('#gesture')) $('#gesture').checked = !!(s.gesture && s.gesture.control);
   if (!$('#v-state')) return;
   const v = s.voice || {}, x = s.xiaozhi || {};
@@ -204,6 +213,12 @@ export function mount(root) {
     $('#mouth-v').textContent = e.target.value + '°';
     act(rpc('robot.mouth', {deg: +e.target.value}));
   };
+  const sliders = [...el.querySelectorAll('[data-head]')];
+  sliders.forEach((r, i) => r.oninput = () => {
+    $('#head-v' + i).textContent = (+r.value).toFixed(2);
+    act(rpc('robot.head', {head: sliders.map(s => +s.value)}));
+  });
+  $('#head-center').onclick = () => act(rpc('robot.head', {head: [0, 0, 0, 0]}));
   if ($('#v-wake')) {
     $('#v-wake').onclick = () => act(rpc('voice.wake'));
     if ($('#v-stop')) $('#v-stop').onclick = () => act(rpc('voice.wake'));
