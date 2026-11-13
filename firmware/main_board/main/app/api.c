@@ -195,7 +195,8 @@ static const char *robot_status(int src, const cJSON *p, cJSON *r)
     cJSON_AddStringToObject(r, "mode", MODE_NAMES[d.mode]);
     cJSON_AddStringToObject(r, "owner", SOURCE_NAMES[d.owner]);
     cJSON_AddBoolToObject(r, "enabled", d.enabled);
-    cJSON_AddBoolToObject(r, "imu_ok", d.imu_ok);
+    /* Online as the controller sees it: a sample within 100 ms (one tick may miss a fresh sample). */
+    cJSON_AddBoolToObject(r, "imu_ok", now - d.imu_time < 0.1);
     cJSON_AddBoolToObject(r, "timed_out", d.timed_out);
     cJSON_AddBoolToObject(r, "control_ready", fresh && now - d.imu_time < 0.1 && d.mode < MODE_CALIBRATE);
     cJSON_AddStringToObject(r, "last_error_code", d.last_error ? d.last_error : "");
