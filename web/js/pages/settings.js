@@ -194,7 +194,9 @@ export function mount(root) {
     <h3 data-i18n="settings.ota_models"></h3><table class="compact"><tbody id="ota-models"></tbody></table>
     <input id="ota-models-file" type="file" accept=".gz,.tgz">
     <div class="row"><button data-ota="models" class="primary" data-i18n="settings.ota_models_go"></button></div>
-    <p id="ota-state" class="muted"></p></section></div>`;
+    <p id="ota-state" class="muted"></p></section>
+  <section class="card"><h2 data-i18n="settings.reset"></h2><p class="muted" data-i18n="settings.reset_help"></p>
+    <button id="reset" data-i18n="settings.reset_go"></button></section></div>`;
   root.append(el);
   apply(el);
   if (has('wifi')) {
@@ -212,6 +214,9 @@ export function mount(root) {
     $('#wifi-ap').onclick = () => act(rpc('wifi.ap', {on: !wifiAp}).then(wifiState));
     $('#wifi-always').onchange = e => act(rpc('wifi.ap', {always: e.target.checked}).then(wifiState));
   }
+  $('#reset').onclick = () => {
+    if (window.confirm(t('settings.reset_confirm'))) act(rpc('system.factory_reset').then(() => { $('#reset').disabled = true; window.alert(t('settings.reset_done')); }));
+  };
   rpc('system.versions').then(v => {
     $('#ota-models').innerHTML = v.models.sort((a, b) => a.file.localeCompare(b.file))
       .map(m => `<tr><td>${esc(m.file)}</td><td class="num">${esc(m.version || '—')}</td></tr>`).join('');

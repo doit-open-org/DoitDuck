@@ -157,7 +157,7 @@ python3 tools/import_policy.py policy.onnx manifest.json --host <IP>            
 
 ### 热点配网
 
-说「开始配网」，或在「设置 → Wi-Fi」点「热点配网」。鸭子打开无密码热点 `DoitDuck-xxxx`，现有的 Wi-Fi 连接不会断。
+还没配过网时鸭子开机自动打开热点；之后说「开始配网」，或在「设置 → Wi-Fi」点「热点配网」。鸭子打开无密码热点 `DoitDuck-xxxx`，现有的 Wi-Fi 连接不会断。
 
 1. 手机连上热点，设置页会自动弹出；没弹出就打开 `http://192.168.4.1/`。
 2. 选择网络、输入密码并连接，页面实时显示连接状态。

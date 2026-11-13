@@ -291,6 +291,40 @@ static const char *robot_estop(int src, const cJSON *p, cJSON *r)
     return NULL;
 }
 
+/*
+ * The factory reset, a second after the reply: data/ emptied but for the calibration, the network forgotten,
+ * then a reboot; after it xiaozhi makes its ids anew and, with no network, the hotspot opens. Without the
+ * Wi-Fi feature (the PC build) only the program starts again.
+ */
+static void factory_reset_task(void *arg)
+{
+    (void)arg;
+    os_sleep(1);
+    if (system("cd data && for f in *; do case \"$f\" in "
+               "calibration.json|calibration.prev.json|zero_pos.json|imu_level.json) ;; *) rm -rf \"$f\" ;; esac; done") != 0)
+        printf("doitduck: factory reset: data/ not cleared\n");
+    const char *err = NULL;
+    cJSON_Delete(api_call(SRC_WEB, "wifi.forget", NULL, &err));
+    if (err) {
+        printf("doitduck: factory reset, starting again\n");
+        app_restart();
+        return;
+    }
+    printf("doitduck: factory reset, rebooting\n");
+    if (system("sync; reboot") != 0) app_restart();
+}
+
+static const char *factory_reset(int src, const cJSON *p, cJSON *r)
+{
+    (void)p;
+    (void)r;
+    os_lock(&d.lock);
+    arb_estop(src, os_now());
+    os_unlock(&d.lock);
+    os_thread(factory_reset_task, NULL, 0, -1);
+    return NULL;
+}
+
 /* The program starts again a second after the reply (exit 75: S40app starts it). */
 static void ota_restart_task(void *arg)
 {
@@ -556,6 +590,7 @@ static const struct api_method METHODS[] = {
     {"servo.exit", setup_exit, 1},
     {"servo.op", servo_run, 1},
     {"config.get", config_get, 1},
+    {"system.factory_reset", factory_reset, 1},
     {"system.ota", system_ota, 1},
     {"system.versions", system_versions, 1},
 };

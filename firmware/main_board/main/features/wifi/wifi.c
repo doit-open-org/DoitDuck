@@ -5,6 +5,7 @@
  * (S52wifi starts wpa_supplicant and a DHCP client then; see
  * tools/board/S52wifi), and has wpa_supplicant read it again now, starting it
  * when it is not running, and the DHCP client renew once associated.
+ * wifi.forget (the factory reset, which then reboots) leaves CONF without a network.
  *
  * wifi.ap opens an open hotspot, DoitDuck-<end of the MAC>, for setting the
  * network up without a cable (the voice command "开始配网" calls it): a second
@@ -263,6 +264,23 @@ static const char *wifi_connect(int src, const cJSON *p, cJSON *r)
     return NULL;
 }
 
+/* CONF without a network, for the next boot (then the hotspot opens, see start()). Not now: leaving the
+ * network while on it can crash the radio's firmware (SM_DISCONNECT_REQ timed out, "cmd queue crashed"). */
+static const char *wifi_forget(int src, const cJSON *p, cJSON *r)
+{
+    (void)src;
+    (void)p;
+    (void)r;
+    FILE *f = fopen(CONF ".new", "w");
+    if (!f) return "wifi_write";
+    fprintf(f, "ctrl_interface=/var/run/wpa_supplicant\nupdate_config=1\ncountry=CN\n");
+    const int bad = fflush(f) != 0 || fsync(fileno(f)) != 0;
+    fclose(f);
+    if (bad || rename(CONF ".new", CONF) != 0) return "wifi_write";
+    printf("wifi: network forgotten\n");
+    return NULL;
+}
+
 /* ---- the hotspot ---- */
 
 /* A DHCP reply (OFFER or ACK) to a request, the address AP_IP's subnet .10 + lease. */
@@ -448,12 +466,21 @@ static const char *wifi_ap(int src, const cJSON *p, cJSON *r)
     return NULL;
 }
 
-/* The hotspot kept open by wifi.ap {always: true} opens again. */
+/* The hotspot kept open by wifi.ap {always: true} opens again; with no network in CONF yet
+ * (none, or the image's placeholder "your_ssid") it opens too, until the board is on one. */
 static void start(void)
 {
-    char v[4];
-    if (store_kv_get("wifi_ap.txt", v, sizeof v) <= 0 || v[0] != '1') return;
-    cJSON *p = cJSON_Parse("{\"always\":true}"), *r = cJSON_CreateObject();
+    char v[4], text[2048] = "";
+    FILE *f = fopen(CONF, "r");
+    if (f) {
+        text[fread(text, 1, sizeof text - 1, f)] = 0;
+        fclose(f);
+    }
+    const int always = store_kv_get("wifi_ap.txt", v, sizeof v) > 0 && v[0] == '1';
+    const int unset = !strstr(text, "network={") || strstr(text, "ssid=\"your_ssid\"");
+    if (!always && !unset) return;
+    if (!always) printf("wifi: no network set, opening the hotspot\n");
+    cJSON *p = cJSON_Parse(always ? "{\"always\":true}" : "{\"on\":true}"), *r = cJSON_CreateObject();
     wifi_ap(0, p, r);
     cJSON_Delete(p);
     cJSON_Delete(r);
@@ -464,6 +491,7 @@ static const struct api_method METHODS[] = {
     {"wifi.scan", wifi_scan, 1},
     {"wifi.connect", wifi_connect, 1},
     {"wifi.ap", wifi_ap, 0}, /* also by voice */
+    {"wifi.forget", wifi_forget, 1},
 };
 
 const struct feature wifi_feature = {
@@ -471,5 +499,5 @@ const struct feature wifi_feature = {
     .configure = configure,
     .start = start,
     .methods = METHODS,
-    .nmethods = 4,
+    .nmethods = 5,
 };
