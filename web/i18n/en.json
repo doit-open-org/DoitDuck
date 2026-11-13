@@ -32,6 +32,7 @@
  "control.gesture": "Gesture control",
  "control.imu_offline": "IMU offline",
  "control.interrupt": "Interrupt",
+ "control.interrupted": "⏹ Cut the duck off",
  "control.keys": "Keys: W/S forward, A/D sideways, Q/E turn, Space stops",
  "control.mode_head": "Sticks: head",
  "control.mode_walk": "Sticks: walk",

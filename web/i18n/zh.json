@@ -32,6 +32,7 @@
  "control.gesture": "手势控制",
  "control.imu_offline": "IMU 离线",
  "control.interrupt": "打断",
+ "control.interrupted": "⏹ 打断了小智",
  "control.keys": "键盘：W/S 前后，A/D 平移，Q/E 转向，空格急停",
  "control.mode_head": "摇杆：头部",
  "control.mode_walk": "摇杆：走路",

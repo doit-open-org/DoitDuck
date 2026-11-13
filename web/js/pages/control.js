@@ -146,6 +146,11 @@ function remember(s) {
   }
   if (x && x.stt && x.stt !== seen.stt) add('you', t('control.you_said', {text: seen.stt = x.stt}));
   if (x && x.tts && x.tts !== seen.tts) add('duck', t('control.duck_said', {text: seen.tts = x.tts}));
+  // Interrupts since the page opened (the count it opened with is not news).
+  if (x && x.interrupts !== seen.interrupts) {
+    if (seen.interrupts !== undefined) add('you', t('control.interrupted'));
+    seen.interrupts = x.interrupts;
+  }
   if (g && g.last_call && (g.last_call + g.last_result + g.gesture) !== seen.gesture) {
     seen.gesture = g.last_call + g.last_result + g.gesture;
     add('you', `✋ ${t('gesture.' + (g.gesture || 'none'))} → ${g.last_call} → ${resultText(g.last_result)}`);

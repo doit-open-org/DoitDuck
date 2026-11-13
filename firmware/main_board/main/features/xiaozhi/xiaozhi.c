@@ -45,6 +45,7 @@ static const char *const STATE_NAMES[] = {"unavailable", "checking", "activating
 
 static os_mutex_t lock = OS_MUTEX_INIT;
 static int state = XZ_CHECKING;
+static int interrupts; /* times the wake word cut the duck off, for the web page's log */
 static char ota_url[160] = "https://api.tenclass.net/xiaozhi/ota/";
 static char device_id[32], client_id[40], ws_url[160], token[160], session[64];
 static char reason[128], code[16], code_message[160], last_stt[256], last_tts[256], emotion[24];
@@ -244,7 +245,10 @@ static void on_event(int ev, const char *text)
         state = XZ_CONNECTING;
         reason[0] = 0;
     }
-    if (interrupt) play_until = 0; /* the queued speech is dropped below */
+    if (interrupt) {
+        play_until = 0; /* the queued speech is dropped below */
+        interrupts++;
+    }
     os_unlock(&lock);
     if (interrupt) {
         /* The wake word interrupts the duck, as on the ESP32 devices. */
@@ -388,6 +392,7 @@ static void status(cJSON *r)
     cJSON_AddStringToObject(r, "stt", last_stt);
     cJSON_AddStringToObject(r, "tts", last_tts);
     cJSON_AddStringToObject(r, "emotion", emotion);
+    cJSON_AddNumberToObject(r, "interrupts", interrupts);
     os_unlock(&lock);
 }
 
