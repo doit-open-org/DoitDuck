@@ -17,6 +17,7 @@ void sound_tick(void);             /* every microphone frame: the mouth, quacks 
 /* xiaozhi's speech (16 kHz): queued behind what is still playing; drops other sounds while it plays. */
 void sound_speech(const int16_t *pcm, int samples);
 void sound_speech_stop(void);      /* drops the queued speech at once */
+void sound_say_ip(const char *ip);  /* "配网成功，请使用浏览器访问" and the address, queued as speech */
 
 extern const struct api_method SOUND_METHODS[];
 extern const int NSOUND_METHODS;

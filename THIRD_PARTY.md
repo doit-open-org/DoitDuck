@@ -17,4 +17,4 @@
 
 `models/nihaoxiaoya.mipk`、`models/kaishipeiwang.mipk` 是本项目自己训练的语音模型，许可和本仓库相同。
 
-manifest 的格式沿用 Microduck 的 `policy-manifest.md`（schema 2），本仓库只读写这个格式。叫声（`sounds/`）由 `tools/gen_sounds.py` 合成，没有使用任何录音；合成算法移植自 Microduck 的 `sounds`（Apache-2.0，见上表）。
+manifest 的格式沿用 Microduck 的 `policy-manifest.md`（schema 2），本仓库只读写这个格式。叫声（`sounds/`）由 `tools/gen_sounds.py` 合成，没有使用任何录音；合成算法移植自 Microduck 的 `sounds`（Apache-2.0，见上表）。配网后播报 IP 的语音（`sounds/say/`）由 `tools/gen_say.py` 调用 edge-tts（微软在线语音 zh-CN-XiaoxiaoNeural）生成。

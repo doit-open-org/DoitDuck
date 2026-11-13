@@ -286,6 +286,31 @@ void sound_speech_stop(void)
     audio_flush();
 }
 
+/* Clip k of sounds/say/ (gen_say.py) queued as speech, 60 ms at a time as xiaozhi's comes; each read once and kept. */
+static void say(int k)
+{
+    static const char *const SAY[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "dot", "ip"};
+    static const int16_t *pcm[12];
+    static int len[12];
+    if (!pcm[k]) {
+        char path[32];
+        size_t size = 0;
+        snprintf(path, sizeof path, "sounds/say/%s.wav", SAY[k]);
+        const uint8_t *w = store_blob(path, &size);
+        pcm[k] = w ? wav_pcm(w, size, &len[k]) : NULL;
+        if (!pcm[k]) printf("sound: cannot read %s\n", path);
+    }
+    for (int i = 0; i < len[k]; i += 960) sound_speech(pcm[k] + i, len[k] - i < 960 ? len[k] - i : 960);
+}
+
+void sound_say_ip(const char *ip)
+{
+    say(11);
+    for (; *ip; ip++) {
+        if (*ip == '.' || (*ip >= '0' && *ip <= '9')) say(*ip == '.' ? 10 : *ip - '0');
+    }
+}
+
 /* The mouth follows level (0..255), or closes when nothing plays (-1). */
 static void mouth(int level)
 {

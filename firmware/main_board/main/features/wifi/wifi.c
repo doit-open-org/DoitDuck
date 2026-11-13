@@ -6,6 +6,7 @@
  * tools/board/S52wifi), and has wpa_supplicant read it again now, starting it
  * when it is not running, and the DHCP client renew once associated.
  * wifi.forget (the factory reset, which then reboots) leaves CONF without a network.
+ * Once a wifi.connect has the board on the network, the duck reads its address aloud.
  *
  * wifi.ap opens an open hotspot, DoitDuck-<end of the MAC>, for setting the
  * network up without a cable (the voice command "开始配网" calls it): a second
@@ -32,6 +33,7 @@
 
 #include "feature.h"
 #include "osal.h"
+#include "sound.h"
 #include "storage.h"
 
 #define IFACE "wlan0"
@@ -54,6 +56,7 @@ static os_mutex_t lock = OS_MUTEX_INIT;
 static int ap_on, ap_leave, ap_always;  /* the hotspot is up; it is to close; it stays open */
 static double ap_until;
 static char ap_ssid[32];
+static char ip_before[32];  /* the address when wifi.connect was called */
 
 static int configure(const cJSON *section)
 {
@@ -216,6 +219,24 @@ static void renew(void *arg)
     if (system("udhcpc -i " IFACE " -b -S -p " DHCP_PID " >/dev/null 2>&1") != 0) printf("wifi: udhcpc failed\n");
 }
 
+/* After wifi.connect, up to 60 s: on the network with an address (a new one, or after 15 s the same), read aloud. */
+static void announce(void *arg)
+{
+    (void)arg;
+    char text[1024], state[32], ip[32];
+    for (int i = 0; i < 120; i++) {
+        os_sleep(0.5);
+        if (wpa_cli("status", text, sizeof text) != 0) continue;
+        field(text, "wpa_state", state, sizeof state);
+        field(text, "ip_address", ip, sizeof ip);
+        if (!strcmp(state, "COMPLETED") && ip[0] && strcmp(ip, "0.0.0.0") && (strcmp(ip, ip_before) || i >= 30)) {
+            printf("wifi: on the network at %s\n", ip);
+            sound_say_ip(ip);
+            return;
+        }
+    }
+}
+
 /* wpa_supplicant on CONF's network, started if it is not running (with GLOBAL, for the hotspot); the DHCP client renews once associated. */
 static int join(void)
 {
@@ -260,7 +281,11 @@ static const char *wifi_connect(int src, const cJSON *p, cJSON *r)
     os_unlock(&lock);
     /* The page on the hotspot waits for the address on the new network: none until DHCP has answered there. */
     if (on && system("kill $(cat " DHCP_PID ") 2>/dev/null; ifconfig " IFACE " 0.0.0.0") != 0) printf("wifi: ifconfig failed\n");
+    char text[1024];
+    ip_before[0] = 0;
+    if (wpa_cli("status", text, sizeof text) == 0) field(text, "ip_address", ip_before, sizeof ip_before);
     if (join() != 0) return "wifi_write";
+    os_thread(announce, NULL, 0, -1);
     return NULL;
 }
 
