@@ -347,6 +347,7 @@
  "wizard.level_failed": "Not measured. Keep it still and try again",
  "wizard.level_ok": "Level enough, no nudge needed",
  "wizard.manual": "Nudge by hand",
+ "wizard.nudged": "This visit",
  "wizard.measure": "Measure",
  "wizard.measuring": "Measuring…",
  "wizard.no_suggestion": "No suggestion (calibration.roll_fix is empty); nudge by hand below",

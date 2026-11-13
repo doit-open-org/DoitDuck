@@ -12,6 +12,7 @@ const STEPS = ['servos', 'imu_bias', 'zero', 'stand'];
 let el, unsub, beat, tab = 'wizard', step = 0, calSteps = {}, s = null;
 // The zero step's way: free (torque off, posed by hand) or hold (the servos hold targets[] with a weak force).
 let found = {}, scanning = false, zeroMode = 'free', targets = [];
+let standBase = null; /* the zeros when the stand step opened, for its "this visit" column */
 const $ = q => el.querySelector(q);
 const names = () => L(store.info.motor_names) || store.info.motors.map(String);
 const deg2raw = d => Math.round(d * 4095 / 360 * store.info.motor_sign);
@@ -50,6 +51,7 @@ function renderSteps() {
   $('#steps').innerHTML = STEPS.map((k, i) => `<button data-step="${i}" class="${i === step ? 'on' : ''} ${calSteps[k] ? 'done' : ''}">
     ${calSteps[k] ? '✓ ' : ''}${i + 1}. ${esc(t('step.' + k))}</button>`).join('');
   if (step !== 2) targets = [];
+  if (step !== 3) standBase = null;
   $('#step-body').innerHTML = [stepServos, stepImu, stepZero, stepStand][step]();
   apply($('#step-body'));
   render();
@@ -89,8 +91,10 @@ const stepStand = () => `<p data-i18n="wizard.stand_help"></p>
   <dl id="w-measure" class="kv"></dl><div id="w-nudges"></div>
   <details><summary data-i18n="wizard.manual"></summary>
     <div class="row"><span data-i18n="wizard.step_deg"></span><select id="w-step"><option>0.5</option><option selected>1</option><option>2</option></select></div>
-    <table><tbody>${names().map((n, i) => `<tr><td>${esc(n)}</td>
-      <td><button data-nudge="${i}" data-dir="-1">−</button> <button data-nudge="${i}" data-dir="1">+</button></td></tr>`).join('')}</tbody></table></details>
+    <table><thead><tr><th data-i18n="status.joint"></th><th></th><th data-i18n="wizard.nudged"></th></tr></thead>
+      <tbody>${names().map((n, i) => `<tr><td>${esc(n)}</td>
+      <td><button data-nudge="${i}" data-dir="-1">−</button> <button data-nudge="${i}" data-dir="1">+</button></td>
+      <td id="w-nud${i}" class="num"></td></tr>`).join('')}</tbody></table></details>
   <div class="row"><button id="w-pass" class="primary" data-i18n="wizard.pass"></button></div>`;
 
 async function checkServos() {
@@ -147,6 +151,12 @@ function render() {
   if (tab === 'wizard' && step === 2) el.querySelectorAll('[data-target]').forEach(r => { r.disabled = !targets.length; });
   if (tab === 'wizard' && step === 3 && $('#w-level-state')) {
     $('#w-level-state').textContent = ['', t('wizard.measuring'), t('wizard.done'), t('wizard.level_failed')][s.level_result] || '';
+    // This visit's nudges, by hand or suggested: how far each zero has moved since the step opened.
+    if (!standBase) standBase = [...s.zero_pos];
+    s.zero_pos.forEach((z, i) => {
+      const d = (z - standBase[i]) * 360 / 4095 * info.motor_sign;
+      $('#w-nud' + i).textContent = Math.abs(d) < 0.05 ? '' : `${d > 0 ? '+' : ''}${d.toFixed(1)}°`;
+    });
   }
 }
 
@@ -269,6 +279,7 @@ function tabClick(e) {
 }
 
 export function mount(root) {
+  standBase = null;
   el = document.createElement('section');
   el.className = 'card';
   el.innerHTML = `<div class="tabs">${TABS.map(k => `<button data-tab="${k}">${esc(t('maintain.' + k))}</button>`).join('')}</div><div id="tab" class="stack"></div>`;

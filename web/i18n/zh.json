@@ -347,6 +347,7 @@
  "wizard.level_failed": "没有测到，请放稳后再试",
  "wizard.level_ok": "躯干基本水平，不用微调",
  "wizard.manual": "手动微调",
+ "wizard.nudged": "本次微调",
  "wizard.measure": "测量",
  "wizard.measuring": "测量中…",
  "wizard.no_suggestion": "没有自动建议（机身配置的 calibration.roll_fix 为空），可以用下面的手动微调",
