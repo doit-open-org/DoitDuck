@@ -6,14 +6,18 @@
  */
 #include "api.h"
 
+#include <dirent.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "app.h"
 #include "config.h"
 #include "duck.h"
 #include "policies.h"
+#include "storage.h"
 
 #define MAX_METHODS 64
 
@@ -106,6 +110,9 @@ static const struct {
     {"calib_storage", "cannot save the calibration"},
     {"calib_no_undo", "no earlier calibration"},
     {"calib_missing", "no calibration yet"},
+    {"ota_package", "not an upgrade package of this kind for this board"},
+    {"ota_storage", "cannot install the upgrade"},
+    {"ota_offset", "the upload was interrupted; upload the package again"},
 };
 
 static const struct api_method *extra[MAX_METHODS];
@@ -283,6 +290,130 @@ static const char *robot_estop(int src, const cJSON *p, cJSON *r)
     return NULL;
 }
 
+/* The program starts again a second after the reply (exit 75: S40app starts it). */
+static void ota_restart_task(void *arg)
+{
+    (void)arg;
+    os_sleep(1);
+    printf("doitduck: upgraded, starting again\n");
+    app_restart();
+}
+
+/*
+ * {kind, offset, data, last}: a piece of an upgrade package, base64, in order (a POST takes 4 MB at most),
+ * gathered in data/ota.tar.gz; tools/pack_ota.sh makes the packages. After the last piece it is unpacked in
+ * data/ota/ and checked against its version.json, which says what it is:
+ *   {"kind": "app", "version": "0.2.0"}: doitduck, web/, robots/, sounds/, each replacing the one here; its
+ *       doitduck must be built for this board (the same ELF header as this program).
+ *   {"kind": "models", "models": {"walk.bin": "1.1"}}: models/ with those files, replacing the models of their
+ *       names, the others staying; their versions go in models/versions.json.
+ * Then the program starts again.
+ */
+static const char *system_ota(int src, const cJSON *p, cJSON *r)
+{
+    (void)r;
+    const double offset = num(p, "offset", -1);
+    const char *b64 = str(p, "data");
+    const size_t cap = strlen(b64) / 4 * 3 + 3;
+    uint8_t *file = malloc(cap);
+    const int n = file ? api_base64_decode(b64, file, cap) : -1;
+    const char *err = n <= 0 ? "ota_package" : NULL;
+    if (!err && offset == 0) {
+        if (store_put("ota.tar.gz", file, (size_t)n) != 0) err = "ota_storage";
+    } else if (!err) {
+        /* The next piece goes where the last one ended. */
+        FILE *f = fopen("data/ota.tar.gz", "ab");
+        if (!f || fseek(f, 0, SEEK_END) != 0 || ftell(f) != (long)offset) err = "ota_offset";
+        else if (fwrite(file, 1, (size_t)n, f) != (size_t)n) err = "ota_storage";
+        if (f && fclose(f) != 0 && !err) err = "ota_storage";
+    }
+    free(file);
+    if (err) store_remove("ota.tar.gz");
+    if (err || !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(p, "last"))) return err;
+
+    const int app = !strcmp(str(p, "kind"), "app");
+    char cmd[256];
+    snprintf(cmd, sizeof cmd, "rm -rf data/ota && mkdir data/ota && tar xzof data/ota.tar.gz -C data/ota && cd data/ota && "
+             "for f in *; do case \"$f\" in version.json|%s) ;; *) exit 1 ;; esac; done", app ? "doitduck|web|robots|sounds" : "models");
+    if (system(cmd) != 0) err = "ota_package";
+    char *text = err ? NULL : store_get("ota/version.json", NULL);
+    cJSON *m = cJSON_Parse(text);
+    free(text);
+    const cJSON *models = cJSON_GetObjectItemCaseSensitive(m, "models"), *e;
+    if (!err && strcmp(str(m, "kind"), app ? "app" : "models")) err = "ota_package";
+    if (!err && app) {
+        uint8_t a[20], b[20];
+        FILE *f = fopen("data/ota/doitduck", "rb"), *self = fopen("/proc/self/exe", "rb");
+        if (!str(m, "version")[0] || !f || !self || fread(a, 1, 20, f) != 20 || fread(b, 1, 20, self) != 20 || memcmp(a, b, 20))
+            err = "ota_package";
+        if (f) fclose(f);
+        if (self) fclose(self);
+    }
+    if (!err && !app) {
+        if (!cJSON_IsObject(models) || !models->child) err = "ota_package";
+        cJSON_ArrayForEach(e, models) {
+            char path[160];
+            snprintf(path, sizeof path, "data/ota/models/%s", e->string);
+            if (!cJSON_IsString(e) || strchr(e->string, '/') || e->string[0] == '.' || access(path, F_OK) != 0) err = "ota_package";
+        }
+    }
+    if (!err && system(app ? "cd data/ota && for f in doitduck web robots sounds; do [ -e \"$f\" ] || continue; "
+                             "rm -rf \"../../$f\" && mv \"$f\" ../../ || exit 1; done && sync"
+                           : "mkdir -p models && mv -f data/ota/models/* models/ && sync") != 0)
+        err = "ota_storage";
+    if (!err && !app) {
+        char *old = (char *)store_blob("models/versions.json", NULL);
+        cJSON *v = cJSON_Parse(old);
+        free(old);
+        if (!cJSON_IsObject(v)) {
+            cJSON_Delete(v);
+            v = cJSON_CreateObject();
+        }
+        cJSON_ArrayForEach(e, models) {
+            cJSON_DeleteItemFromObjectCaseSensitive(v, e->string);
+            cJSON_AddStringToObject(v, e->string, e->valuestring);
+        }
+        char *s = cJSON_Print(v);
+        FILE *f = fopen("models/versions.json", "w");
+        if (!f || fputs(s, f) < 0) printf("doitduck: ota: models/versions.json not written\n");
+        if (f) fclose(f);
+        free(s);
+        cJSON_Delete(v);
+    }
+    cJSON_Delete(m);
+    if (system("rm -rf data/ota data/ota.tar.gz; sync") != 0) printf("doitduck: ota: data/ota not removed\n");
+    if (err) return err;
+    os_lock(&d.lock);
+    arb_estop(src, os_now());
+    os_unlock(&d.lock);
+    os_thread(ota_restart_task, NULL, 0, -1);
+    return NULL;
+}
+
+/* The program's version, and each file in models/ with its version from models/versions.json ("" if not known). */
+static const char *system_versions(int src, const cJSON *p, cJSON *r)
+{
+    (void)src;
+    (void)p;
+    cJSON_AddStringToObject(r, "app", DOITDUCK_VERSION);
+    char *text = (char *)store_blob("models/versions.json", NULL);
+    cJSON *v = cJSON_Parse(text);
+    free(text);
+    cJSON *list = cJSON_AddArrayToObject(r, "models");
+    DIR *dir = opendir("models");
+    const struct dirent *e;
+    while (dir && (e = readdir(dir))) {
+        if (e->d_name[0] == '.' || !strcmp(e->d_name, "versions.json")) continue;
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "file", e->d_name);
+        cJSON_AddStringToObject(o, "version", str(v, e->d_name));
+        cJSON_AddItemToArray(list, o);
+    }
+    if (dir) closedir(dir);
+    cJSON_Delete(v);
+    return NULL;
+}
+
 static const char *robot_skill(int src, const cJSON *p, cJSON *r)
 {
     (void)r;
@@ -424,6 +555,8 @@ static const struct api_method METHODS[] = {
     {"servo.exit", setup_exit, 1},
     {"servo.op", servo_run, 1},
     {"config.get", config_get, 1},
+    {"system.ota", system_ota, 1},
+    {"system.versions", system_versions, 1},
 };
 
 void api_register(const struct api_method *methods, int n)

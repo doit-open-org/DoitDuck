@@ -2,7 +2,7 @@
 // (volume, idle quacks, the user's recordings), and what voice,
 // xiaozhi, gestures and the gamepad are configured with. Voice, gesture and gamepad mappings
 // live in robots/<name>.json and are shown here as they are.
-import {rpc, post} from '../rpc.js';
+import {rpc, post, onConn} from '../rpc.js';
 import {store, has} from '../store.js';
 import {t, tr, esc, apply} from '../i18n.js';
 import {toast, act} from '../components/toast.js';
@@ -12,6 +12,44 @@ let el, timer;
 const $ = s => el.querySelector(s);
 const kv = rows => `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(t(k))}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
 const call = c => `${c.call}${c.params ? ' ' + JSON.stringify(c.params) : ''}`;
+
+// An upgrade package of this kind (app or models, tools/pack_ota.sh): its version.json is read here first, to
+// show what changes, then the package goes in 1 MB pieces, base64, one POST each (the device takes 4 MB at most);
+// the last one installs it. Once the program has started again and the page is back on line, it loads again.
+async function upgrade(kind) {
+  const file = $(`#ota-${kind}-file`).files[0];
+  if (!file) return toast(t('settings.ota_need'));
+  const buttons = el.querySelectorAll('[data-ota]');
+  try {
+    // The .tar: 512-byte headers, the name at 0 and the size (octal) at 124, each followed by its data.
+    const tar = new Uint8Array(await new Response(file.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+    const text = b => new TextDecoder().decode(b).replace(/\0[^]*$/, '');
+    let m = null;
+    for (let off = 0; off + 512 <= tar.length && tar[off];) {
+      const size = parseInt(text(tar.subarray(off + 124, off + 136)), 8) || 0;
+      if (text(tar.subarray(off, off + 100)).replace(/^\.\//, '') === 'version.json') m = JSON.parse(text(tar.subarray(off + 512, off + 512 + size)));
+      off += 512 + Math.ceil(size / 512) * 512;
+    }
+    if (!m || m.kind !== kind) return toast(t('settings.ota_wrong'));
+    const now = await rpc('system.versions');
+    const changes = kind === 'app' ? `${now.app} → ${m.version}`
+      : Object.entries(m.models).map(([f, v]) => `${f}: ${(now.models.find(x => x.file === f) || {}).version || '—'} → ${v}`).join('\n');
+    if (!window.confirm(t('settings.ota_confirm', {changes}))) return;
+    buttons.forEach(b => { b.disabled = true; });
+    const bytes = new Uint8Array(await file.arrayBuffer()), CHUNK = 1 << 20;
+    for (let off = 0; off < bytes.length; off += CHUNK) {
+      const last = off + CHUNK >= bytes.length;
+      $('#ota-state').textContent = last ? t('settings.ota_installing') : t('settings.ota_sending', {pct: Math.round(off * 100 / bytes.length)});
+      await post('system.ota', {kind, offset: off, data: base64(bytes.subarray(off, off + CHUNK)), last});
+    }
+    $('#ota-state').textContent = t('settings.ota_done');
+    onConn(on => { if (on) location.reload(); });
+  } catch (e) {
+    toast(e);
+    buttons.forEach(b => { b.disabled = false; });
+    $('#ota-state').textContent = '';
+  }
+}
 
 // A recording as a 16 kHz mono 16-bit WAV of at most 3 s, what sound.upload takes.
 async function toWav(file) {
@@ -146,7 +184,15 @@ export function mount(root) {
   ${has('gamepad') ? `<section class="card"><h2 data-i18n="settings.gamepad"></h2><div id="pad"></div></section>` : ''}
   <section class="card"><h2 data-i18n="settings.about"></h2>
     ${kv([['settings.version', info.version], ['settings.board', info.board], ['settings.robot', info.name], ['settings.features', info.features.join(', ')]])}
-    <p data-i18n="settings.licenses"></p></section></div>`;
+    <p data-i18n="settings.licenses"></p></section>
+  <section class="card"><h2 data-i18n="settings.ota"></h2><p class="muted" data-i18n="settings.ota_help"></p>
+    <h3 data-i18n="settings.ota_app"></h3>${kv([['settings.version', info.version]])}
+    <input id="ota-app-file" type="file" accept=".gz,.tgz">
+    <div class="row"><button data-ota="app" class="primary" data-i18n="settings.ota_app_go"></button></div>
+    <h3 data-i18n="settings.ota_models"></h3><table class="compact"><tbody id="ota-models"></tbody></table>
+    <input id="ota-models-file" type="file" accept=".gz,.tgz">
+    <div class="row"><button data-ota="models" class="primary" data-i18n="settings.ota_models_go"></button></div>
+    <p id="ota-state" class="muted"></p></section></div>`;
   root.append(el);
   apply(el);
   if (has('wifi')) {
@@ -164,6 +210,11 @@ export function mount(root) {
     $('#wifi-ap').onclick = () => act(rpc('wifi.ap', {on: !wifiAp}).then(wifiState));
     $('#wifi-always').onchange = e => act(rpc('wifi.ap', {always: e.target.checked}).then(wifiState));
   }
+  rpc('system.versions').then(v => {
+    $('#ota-models').innerHTML = v.models.sort((a, b) => a.file.localeCompare(b.file))
+      .map(m => `<tr><td>${esc(m.file)}</td><td class="num">${esc(m.version || '—')}</td></tr>`).join('');
+  }).catch(toast);
+  el.querySelectorAll('[data-ota]').forEach(b => { b.onclick = () => upgrade(b.dataset.ota); });
   $('#volume').oninput = e => { $('#volume-v').textContent = e.target.value + ' dB'; };
   $('#volume').onchange = e => act(rpc('sound.settings', {volume_db: +e.target.value}));
   $('#idle').onchange = e => act(rpc('sound.settings', {idle: e.target.checked}));

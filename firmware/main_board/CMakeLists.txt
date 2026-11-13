@@ -27,10 +27,11 @@ include("${APP_SDK_PATH}/cmake/project.cmake")
 hifw_project(doitduck)
 
 # The program runs from a directory holding robots/, web/, sounds/ and the
-# user's models/. Copied on every build, so a change to the web page alone also
-# reaches out/.
+# user's models/. Copied afresh on every build, so a change to the web page alone also
+# reaches out/, and a file removed from the sources leaves it (out/ is what an upgrade package holds).
 add_custom_target(doitduck_files ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "${HIFW_OUTPUT_DIR}/models"
+    COMMAND ${CMAKE_COMMAND} -E remove_directory "${HIFW_OUTPUT_DIR}/robots" "${HIFW_OUTPUT_DIR}/web" "${HIFW_OUTPUT_DIR}/sounds"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${DOITDUCK_ROOT}/robots" "${HIFW_OUTPUT_DIR}/robots"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${DOITDUCK_ROOT}/web" "${HIFW_OUTPUT_DIR}/web"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${DOITDUCK_ROOT}/sounds" "${HIFW_OUTPUT_DIR}/sounds"

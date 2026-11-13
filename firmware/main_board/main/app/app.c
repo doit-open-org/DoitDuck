@@ -52,12 +52,17 @@ static const struct feature *const FEATURES[] = {
 /* The running features; fixed once app_run has started them. */
 static const struct feature *running[NFEATURES + 1];
 static int nrunning;
-static volatile sig_atomic_t stop;
+static volatile sig_atomic_t stop, restart;
 
 static void on_signal(int sig)
 {
     (void)sig;
     stop = 1;
+}
+
+void app_restart(void)
+{
+    restart = stop = 1;
 }
 
 void event_post(int ev, const char *text)
@@ -176,5 +181,5 @@ int app_run(void)
     os_sleep(0.05);
     audio_close();
     printf("doitduck: torque off, exit\n");
-    return 0;
+    return restart ? 75 : 0; /* 75: the autostart script (S40app) starts the program again */
 }

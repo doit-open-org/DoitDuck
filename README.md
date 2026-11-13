@@ -94,6 +94,13 @@ scp -r models root@<IP>:/root/doitduck/            # 模型，见下文
 - 热点配网需要系统的 `wpa_supplicant` 带 AP 支持（Buildroot 选项 `BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT`）。
 - 零位、IMU 水平、导入的动作、小智设备号等都存在 `/root/doitduck/data/`，重新部署不会覆盖。
 
+已经部署好的鸭子可以在网页「设置 → 升级」上传升级包，应用和模型分开升级，`data/` 保留：
+
+```sh
+sh tools/pack_ota.sh app                                   # 应用，版本号是 main/app/api.h 的 DOITDUCK_VERSION
+sh tools/pack_ota.sh models 1.1 models/microduck_walk.bin  # 模型，可以列多个，只替换同名的
+```
+
 也可以直接做一个带 DoitDuck 的烧录镜像：先构建好 V610-Buildroot，再在本目录运行 `sh tools/pack_image.sh <V610-Buildroot 路径>`，烧录文件在 `build/image/flash/`，开机自启和 Wi-Fi 都已装好。
 
 ## 第一次使用
