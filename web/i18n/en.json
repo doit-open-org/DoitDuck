@@ -275,6 +275,7 @@
  "settings.wifi_state": "State",
  "settings.xiaozhi": "xiaozhi",
  "settings.xz_code": "Activation code",
+ "settings.xz_bound": "Bound",
  "settings.xz_device": "Device id",
  "settings.xz_help": "First time: add the device at xiaozhi.me with the 6-digit code above.",
  "settings.xz_ota": "Server",

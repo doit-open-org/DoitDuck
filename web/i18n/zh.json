@@ -275,6 +275,7 @@
  "settings.wifi_state": "状态",
  "settings.xiaozhi": "小智",
  "settings.xz_code": "激活码",
+ "settings.xz_bound": "已绑定",
  "settings.xz_device": "设备 ID",
  "settings.xz_help": "第一次使用：到 xiaozhi.me 控制台添加设备，输入上面的 6 位激活码。",
  "settings.xz_ota": "服务器",

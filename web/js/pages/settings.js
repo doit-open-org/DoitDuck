@@ -135,8 +135,10 @@ async function refresh() {
     if (has('wifi')) await wifiState();
     if (has('xiaozhi')) {
       const x = await rpc('xiaozhi.status');
+      // Past checking with no activation code: the server knows the device, it is bound.
+      const bound = ['ready', 'connecting', 'listening', 'speaking'].includes(x.state);
       $('#xz').innerHTML = kv([['settings.xz_state', t('xz.' + x.state)], ['settings.xz_reason', x.reason ? tr('xzr.' + x.reason, x.reason) : '—'],
-        ['settings.xz_code', x.activation_code || '—'], ['settings.xz_device', x.device_id], ['settings.xz_ota', x.ota_url]]);
+        ['settings.xz_code', x.activation_code || (bound ? t('settings.xz_bound') : '—')], ['settings.xz_device', x.device_id], ['settings.xz_ota', x.ota_url]]);
     }
     if (has('voice')) {
       const v = await rpc('voice.status');
