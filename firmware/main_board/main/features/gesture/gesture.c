@@ -19,7 +19,6 @@
 #include "api.h"
 #include "camera.h"
 #include "duck.h"
-#include "event.h"
 #include "feature.h"
 #include "hand.h"
 
@@ -162,7 +161,7 @@ static void run(int g)
         snprintf(last_call, sizeof last_call, "%s", commands[i].method);
         last_result = err ? err : "done";
         os_unlock(&lock);
-        event_post(err ? EV_COMMAND_REJECTED : EV_COMMAND_OK, NAMES[g]);
+        /* No event, so no quack: the quack opens the mouth and would fight the gesture's own mouth command. */
     }
 }
 

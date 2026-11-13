@@ -9,8 +9,8 @@ enum {
     EV_WAKE,              /* voice: the wake word (xiaozhi interrupts the duck while it speaks) */
     EV_WAKE_IDLE,         /* voice: woken, with no command words to wait for (xiaozhi starts a conversation) */
     EV_POLICIES_CHANGED,  /* a policy was imported or removed */
-    EV_COMMAND_OK,        /* voice or gestures: a command ran */
-    EV_COMMAND_REJECTED,  /* voice or gestures: a command was refused */
+    EV_COMMAND_OK,        /* voice: a command ran */
+    EV_COMMAND_REJECTED,  /* voice: a command was refused */
     EV_LISTEN_TIMEOUT,    /* voice or xiaozhi: stopped listening */
     EV_SKILL_DONE,        /* app.c, from the robot state: a skill finished */
     EV_FALL,              /* app.c: the duck fell with torque on */
