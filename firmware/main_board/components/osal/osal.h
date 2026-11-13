@@ -17,7 +17,4 @@ int os_thread(void (*fn)(void *), void *arg, int prio, int core);
 void os_lock(os_mutex_t *m);
 void os_unlock(os_mutex_t *m);
 
-/* A stable id for this board, such as the Wi-Fi MAC "88:3b:dc:bb:dd:ae"; 0 on success. */
-int os_device_id(char *buf, size_t size);
-
 #endif

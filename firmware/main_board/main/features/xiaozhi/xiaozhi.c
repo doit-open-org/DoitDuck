@@ -78,21 +78,26 @@ static void set_state(int s, const char *why)
 }
 
 /*
- * Device-Id: the MAC, kept once read; at boot wlan0 may not exist yet and the
- * eth0 MAC changes. Client-Id: a UUID made once and kept, as the ESP32 firmware
- * keeps its in NVS.
+ * Device-Id: a random MAC (locally administered), and Client-Id: a random UUID,
+ * each made once and kept in data/. xiaozhi.me knows a device by its Device-Id,
+ * so the factory reset, which removes them, makes the duck a new device to activate.
  */
 static void load_ids(void)
 {
+    uint8_t r[22];
+    FILE *f = fopen("/dev/urandom", "rb");
+    if (!f || fread(r, 1, sizeof r, f) != sizeof r) printf("xiaozhi: /dev/urandom not read\n");
+    if (f) fclose(f);
     if (store_kv_get("xz_device.txt", device_id, sizeof device_id) != 17) {
-        if (os_device_id(device_id, sizeof device_id) != 0) snprintf(device_id, sizeof device_id, "00:00:00:00:00:00");
+        snprintf(device_id, sizeof device_id, "%02x:%02x:%02x:%02x:%02x:%02x", (r[0] & 0xFC) | 0x02, r[1], r[2], r[3], r[4], r[5]);
         store_kv_set("xz_device.txt", device_id);
     }
     if (store_kv_get("xz_client.txt", client_id, sizeof client_id) == 36) return;
-    srand((unsigned)(os_now() * 1e6) ^ (unsigned)device_id[16]);
-    snprintf(client_id, sizeof client_id, "%04x%04x-%04x-4%03x-%04x-%04x%04x%04x", rand() & 0xFFFF,
-             rand() & 0xFFFF, rand() & 0xFFFF, rand() & 0xFFF, (rand() & 0x3FFF) | 0x8000, rand() & 0xFFFF,
-             rand() & 0xFFFF, rand() & 0xFFFF);
+    /* UUID version 4: r[6..21], with the version and variant bits set. */
+    r[12] = (r[12] & 0x0F) | 0x40;
+    r[14] = (r[14] & 0x3F) | 0x80;
+    char *s = client_id;
+    for (int i = 0; i < 16; i++) s += sprintf(s, "%s%02x", i == 4 || i == 6 || i == 8 || i == 10 ? "-" : "", r[6 + i]);
     store_kv_set("xz_client.txt", client_id);
 }
 

@@ -81,21 +81,3 @@ void os_unlock(os_mutex_t *m)
 {
     pthread_mutex_unlock(m);
 }
-
-int os_device_id(char *buf, size_t size)
-{
-    static const char *const ifaces[] = {"wlan0", "eth0", "usb0"};
-    for (size_t i = 0; i < sizeof ifaces / sizeof ifaces[0]; i++) {
-        char path[64];
-        snprintf(path, sizeof path, "/sys/class/net/%s/address", ifaces[i]);
-        FILE *f = fopen(path, "r");
-        if (!f) continue;
-        const int ok = fgets(buf, (int)size, f) != NULL;
-        fclose(f);
-        if (ok) {
-            buf[strcspn(buf, "\n")] = 0;
-            return 0;
-        }
-    }
-    return -1;
-}
