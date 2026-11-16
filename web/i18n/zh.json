@@ -97,6 +97,7 @@
  "err.no_such_skill": "没有这个动作",
  "err.no_such_sound": "没有这个声音",
  "err.ota_package": "升级包不对：类型、内容或板子不符",
+ "err.ota_libs": "固件镜像缺少新程序需要的库，请先升级镜像",
  "err.ota_offset": "上传中断了，请重新上传升级包",
  "err.ota_storage": "安装升级失败",
  "err.not_calibrating": "不在标定模式",

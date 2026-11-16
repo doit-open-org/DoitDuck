@@ -113,6 +113,7 @@ static const struct {
     {"ota_package", "not an upgrade package of this kind for this board"},
     {"ota_storage", "cannot install the upgrade"},
     {"ota_offset", "the upload was interrupted; upload the package again"},
+    {"ota_libs", "the board image lacks libraries this program needs; update the image first"},
 };
 
 static const struct api_method *extra[MAX_METHODS];
@@ -339,7 +340,8 @@ static void ota_restart_task(void *arg)
  * gathered in data/ota.tar.gz; tools/pack_ota.sh makes the packages. After the last piece it is unpacked in
  * data/ota/ and checked against its version.json, which says what it is:
  *   {"kind": "app", "version": "0.2.0"}: doitduck, web/, robots/, sounds/, each replacing the one here; its
- *       doitduck must be built for this board (the same ELF header as this program).
+ *       doitduck must be built for this board (the same ELF header as this program), and the
+ *       image must have the libraries it needs, or it would not start.
  *   {"kind": "models", "models": {"walk.bin": "1.1"}}: models/ with those files, replacing the models of their
  *       names, the others staying; their versions go in models/versions.json.
  * Then the program starts again.
@@ -384,6 +386,11 @@ static const char *system_ota(int src, const cJSON *p, cJSON *r)
         if (f) fclose(f);
         if (self) fclose(self);
     }
+    /* musl's loader lists the libraries, "Error loading shared library" for one the image lacks (its exit
+     * status is 0 all the same). No such loader, as on a PC: not checked. */
+    if (!err && app && system("[ ! -x /lib/ld-musl-arm.so.1 ] || ! /lib/ld-musl-arm.so.1 --list data/ota/doitduck 2>&1 "
+                              "| grep -q 'Error loading'") != 0)
+        err = "ota_libs";
     if (!err && !app) {
         if (!cJSON_IsObject(models) || !models->child) err = "ota_package";
         cJSON_ArrayForEach(e, models) {

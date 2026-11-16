@@ -97,6 +97,7 @@
  "err.no_such_skill": "No such skill",
  "err.no_such_sound": "No such sound",
  "err.ota_package": "Wrong upgrade package: its kind, contents or board do not match",
+ "err.ota_libs": "The board image lacks libraries this program needs; update the image first",
  "err.ota_offset": "The upload was interrupted; upload the package again",
  "err.ota_storage": "Cannot install the upgrade",
  "err.not_calibrating": "Not in calibration",
