@@ -28,6 +28,11 @@ config DOITDUCK_WIFI
     bool "Wi-Fi settings on the web page (wpa_supplicant, wlan0)"
     default y
 
+config DOITDUCK_BLUFI
+    bool "BluFi: Wi-Fi set from a phone over BLE (EspBlufi) while the hotspot is open"
+    default y
+    depends on DOITDUCK_WIFI
+
 config DOITDUCK_TOF
     bool "ToF distance sensor (ST VL53L5CX, 8x8 zones), shown on the web page"
     default y

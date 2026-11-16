@@ -23,7 +23,7 @@ DoitDuck 是 [Microduck](https://github.com/pollen-robotics/microduck) 双足机
 | 动作模型 | 网络结构（MLP 61 → 512 → 256 → 128 → 14）、ONNX + `manifest.json`（schema 2），兼容的 Microduck 模型可以直接导入 | 转换成 float32 权重文件，在主控上推理 |
 | 叫声 | 合成算法，来自 Microduck 的 `sounds` | 从 Rust 移植到 Python，改为 16 kHz；另外支持主动叫和上传录音 |
 | 主控和电路 | — | Cove-610 主控、自制 IMU 小板（ESP32-C2 + LSM6DSV16X，兼做电源板）、CV610 连接板 |
-| 交互 | — | 网页控制和标定向导、热点配网、唤醒词和小智对话、手势、ToF |
+| 交互 | — | 网页控制和标定向导、热点和蓝牙配网、唤醒词和小智对话、手势、ToF |
 
 感谢 Microduck 的作者开放设计和模型。
 
@@ -92,6 +92,7 @@ scp -r models root@<IP>:/root/doitduck/            # 模型，见下文
 - 开机自启：把 `/etc/init.d/S40app` 的 `APP_PATH` 改成 `/root/doitduck/doitduck`。
 - 开机连 Wi-Fi：把 [tools/board/S52wifi](tools/board/S52wifi) 拷到 `/etc/init.d/` 并 `chmod +x`。
 - 热点配网需要系统的 `wpa_supplicant` 带 AP 支持（Buildroot 选项 `BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT`）。
+- 蓝牙配网需要镜像带 BlueZ 和 GLib（Buildroot 选项 `BR2_PACKAGE_AIC8800D_SDIO_BLE`）。程序链接了 GLib，镜像里没有它程序就启动不了；不用蓝牙时在 Kconfig 关掉 `DOITDUCK_BLUFI`。
 - 零位、IMU 水平、导入的动作、小智设备号等都存在 `/root/doitduck/data/`，重新部署不会覆盖。
 
 已经部署好的鸭子可以在网页「设置 → 升级」上传升级包，应用和模型分开升级，`data/` 保留：
@@ -162,6 +163,8 @@ python3 tools/import_policy.py policy.onnx manifest.json --host <IP>            
 1. 手机连上热点，设置页会自动弹出；没弹出就打开 `http://192.168.4.1/`。
 2. 选择网络、输入密码并连接，页面实时显示连接状态。
 3. 连上后弹窗显示新的 IP，确认后关闭热点。密码错了热点不关，改了再连。
+
+热点开着时，鸭子也用蓝牙广播 `BLUFI-DoitDuck-xxxx`，可以用乐鑫的 EspBlufi App 通过蓝牙配网（BluFi）。
 
 没有操作时，鸭子已经在网上的话，热点 10 分钟后自动关闭。勾选「热点常开」后热点一直开着，开机也自动打开，外出没有路由器时手机连热点就能控制。
 

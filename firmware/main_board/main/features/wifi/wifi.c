@@ -31,6 +31,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "event.h"
 #include "feature.h"
 #include "osal.h"
 #include "sound.h"
@@ -379,6 +380,7 @@ static void hotspot(void *arg)
         return;
     }
     printf("wifi: hotspot %s up, http://" AP_IP "/\n", ap_ssid);
+    event_post(EV_HOTSPOT_OPEN, ap_ssid);
 
     const int sock = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     const int one = 1;
@@ -447,6 +449,7 @@ static void hotspot(void *arg)
     if (dns >= 0) close(dns);
     global("interface_remove " AP_IF);
     printf("wifi: hotspot closed\n");
+    event_post(EV_HOTSPOT_CLOSED, "");
     os_lock(&lock);
     ap_on = ap_leave = 0;
     os_unlock(&lock);

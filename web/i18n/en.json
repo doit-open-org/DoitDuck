@@ -262,7 +262,7 @@
  "settings.wifi_ap_stop": "Close hotspot",
  "settings.wifi_connect": "Connect",
  "settings.wifi_failed": "Could not connect. Check the password",
- "settings.wifi_help": "Saying “开始配网” to the duck also opens the hotspot.",
+ "settings.wifi_help": "Saying “开始配网” to the duck also opens the hotspot. While it is open, the EspBlufi app can also set the Wi-Fi over Bluetooth.",
  "settings.wifi_hotspot": "Hotspot",
  "settings.wifi_ip": "IP address",
  "settings.wifi_joined": "Joined {ssid}, IP: {ip}",

@@ -21,7 +21,7 @@
 #include "policies.h"
 #include "sound.h"
 
-extern const struct feature web_feature, gamepad_feature, voice_feature, xiaozhi_feature, gesture_feature, tof_feature, wifi_feature;
+extern const struct feature web_feature, gamepad_feature, voice_feature, xiaozhi_feature, gesture_feature, tof_feature, wifi_feature, blufi_feature;
 
 static const struct feature *const FEATURES[] = {
 #ifdef CONFIG_DOITDUCK_WEB
@@ -44,6 +44,9 @@ static const struct feature *const FEATURES[] = {
 #endif
 #ifdef CONFIG_DOITDUCK_WIFI
     &wifi_feature,
+#endif
+#ifdef CONFIG_DOITDUCK_BLUFI
+    &blufi_feature,
 #endif
     NULL,
 };

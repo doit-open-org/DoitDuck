@@ -16,6 +16,8 @@ enum {
     EV_FALL,              /* app.c: the duck fell with torque on */
     EV_LOW_BATTERY,       /* app.c: the battery went below low_battery_v */
     EV_ESTOP,             /* app.c: torque went off */
+    EV_HOTSPOT_OPEN,      /* wifi: the hotspot is up, the text its name */
+    EV_HOTSPOT_CLOSED,    /* wifi: the hotspot is down */
     EV_COUNT,
 };
 
