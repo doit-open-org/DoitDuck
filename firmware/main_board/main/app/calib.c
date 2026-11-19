@@ -1,5 +1,5 @@
 /*
- * Calibration (docs/doitduck-design.md §10): the back end of the web page's
+ * Calibration: the back end of the web page's
  * wizard. Four steps, each redone on its own:
  *
  *   1 servos     the web page scans the bus (servo.op) and marks the step

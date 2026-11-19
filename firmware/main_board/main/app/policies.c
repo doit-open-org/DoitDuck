@@ -1,5 +1,5 @@
 /*
- * The policy library (docs/doitduck-design.md §7). Every policy is a weight
+ * The policy library. Every policy is a weight
  * file and a Microduck schema 2 manifest; DoitDuck's own fields sit in its
  * "doitduck" object (label, alpha, mouth_deg, mouth_until, hold_recovery,
  * verified). Two sources:

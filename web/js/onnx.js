@@ -103,7 +103,7 @@ export function convert(buffer) {
   return {weights, checks};
 }
 
-// The manifest checks the robot makes too (docs/doitduck-design.md §6.2): [[key, ok, detail]].
+// The manifest checks the robot makes too: [[key, ok, detail]].
 export function checkManifest(m, compatible) {
   const differs = (k, want) => m[k] !== undefined && m[k] !== want;
   const cmd = m.command || {}, enc = cmd.encoding || 'constant', kind = m.kind || '';

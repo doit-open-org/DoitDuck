@@ -1,6 +1,6 @@
 // Actions: the policy library, and importing one. The import wizard converts the ONNX here,
 // checks it as the robot will, uploads it, runs it in preview with its joint targets drawn,
-// and marks it verified when the user is satisfied (docs/doitduck-design.md §6.4).
+// and marks it verified when the user is satisfied.
 import {rpc, post} from '../rpc.js';
 import {store, subscribe} from '../store.js';
 import {t, L, esc, apply} from '../i18n.js';

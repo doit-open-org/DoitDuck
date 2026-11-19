@@ -1,4 +1,4 @@
-// Maintain: the calibration wizard (docs/doitduck-design.md §10), servo tools and the calibration
+// Maintain: the calibration wizard, servo tools and the calibration
 // data. Calibration and servo setup hold the bus only while the page renews them (a heartbeat
 // every second); leaving the page leaves them.
 import {rpc} from '../rpc.js';

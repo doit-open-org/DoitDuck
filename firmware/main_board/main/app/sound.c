@@ -1,5 +1,5 @@
 /*
- * The duck's sounds (docs/doitduck-design.md §11). The quacks are WAVs, 16 kHz
+ * The duck's sounds. The quacks are WAVs, 16 kHz
  * mono 16-bit: the built-in ones in sounds/ (tools/gen_sounds.py), and the
  * user's in data/sounds/, which replace one of the same name or add a new one.
  * robots/<name>.json "sounds" says which one an event plays and when an idle
