@@ -29,7 +29,7 @@ config DOITDUCK_WIFI
     default y
 
 config DOITDUCK_BLUFI
-    bool "BluFi: Wi-Fi set from a phone over BLE (EspBlufi) while the hotspot is open"
+    bool "BluFi: Wi-Fi set from a phone over BLE (the 四博AI mini program) while the hotspot is open"
     default y
     depends on DOITDUCK_WIFI
 

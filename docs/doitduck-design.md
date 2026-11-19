@@ -110,7 +110,7 @@ struct feature {
 | --- | --- | --- |
 | web | httpd，camera 可选 | 网页、WebSocket 指令和状态推送、摄像头 H.264 |
 | gamepad | pad | 手柄按键映射到指令（还没有读取实现） |
-| voice | audio、asr | 唤醒词；命令词（带 `model` 的命令）不用唤醒随时执行；网页语音命令条按配置的命令表执行指令 |
+| voice | audio、asr | 唤醒词；命令词（带 `model` 的命令）唤醒后 `window_s` 秒内说才执行；网页语音命令条按配置的命令表执行指令 |
 | xiaozhi | audio、net、opus，唤醒来自 voice | 和小智服务器对话，MCP 工具控制动作 |
 | gesture | camera、hand | 手势映射到指令 |
 | tof | Linux I2C | VL53L5CX 8×8 测距，线程固定在 CPU1 |
@@ -120,7 +120,7 @@ struct feature {
 
 - 热点线程自带 DHCP 和 DNS。DNS 把所有域名解析到 `192.168.4.1`，httpd 把从这个地址进来、`Host` 是别的域名的请求 302 到设置页，手机连上就会弹出页面（强制门户）。
 - 热点开着时 `wifi.connect` 会先清掉 wlan0 的 IP，网页等到 `COMPLETED` 且有 IP 才弹窗，用户确认后发 `wifi.ap {on: false}` 关闭。
-- 没有确认时，距离上次使用 10 分钟且 wlan0 在网上就自动关闭。`{always: true}` 常开，存在 `data/wifi_ap.txt`，开机打开。
+- 没有确认时，距离上次使用 5 分钟且 wlan0 在网上就自动关闭。`{always: true}` 常开，存在 `data/wifi_ap.txt`，开机打开。
 
 事件用 `event_post(ev, text)` 广播，叫声和各功能按需接收：
 

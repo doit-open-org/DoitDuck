@@ -1,9 +1,13 @@
 /*
  * The BluFi feature: while the hotspot is open (wifi.ap), the duck also takes a
- * network over BLE by Espressif's BluFi (the EspBlufi app), as BLUFI-<the
- * hotspot's name>: the app lists only names that start with BLUFI. The network goes to wifi.connect as one from the web page does (and the
- * duck reads its address aloud); the phone hears back once the duck is on it,
- * and its address as custom data, "url: http://192.168.1.23".
+ * network over BLE by Espressif's BluFi (the 四博AI mini program), as DTXZ_ and
+ * the Wi-Fi MAC with no colons (xiaozhi's Device-Id), e.g. DTXZ_10b06e94224e:
+ * the mini program lists only names that start with DTXZ_.
+ * The network goes to wifi.connect as one from the web page does (and the duck
+ * reads its address aloud); the phone hears back once the duck is on it, then as
+ * custom data {"code": "571480", "ip": "192.168.1.23", "url": "http://192.168.1.23"}:
+ * code is xiaozhi's activation code, "" once activated or with no xiaozhi.
+ * Then the hotspot closes, and BLE with it, unless the hotspot is to stay open.
  * components/blufi: the protocol, its security, and the BLE side on BlueZ,
  * which the image's ble-service starts.
  */
@@ -24,8 +28,7 @@
 static os_mutex_t lock = OS_MUTEX_INIT; /* the protocol and the state below */
 static blufi_protocol *protocol;
 static blufi_ble *ble;
-static int hotspot;                     /* the hotspot is up (EV_HOTSPOT_OPEN), named hotspot_name */
-static char hotspot_name[32];
+static int hotspot;                     /* the hotspot is up (EV_HOTSPOT_OPEN) */
 static blufi_sta_config wanted;         /* a network from the phone, for task() to join */
 static int join_wanted, scan_wanted;
 
@@ -145,7 +148,7 @@ static void report_networks(void)
 }
 
 /* The network from the phone through wifi.connect; then up to JOIN_S for it and an address, and the phone told:
- * the Wi-Fi status, and once on the network the address as custom data. */
+ * the Wi-Fi status, and once on the network the activation code and address as custom data. */
 static void join_network(const blufi_sta_config *c)
 {
     char ssid[BLUFI_SSID_MAX_LEN + 1], password[BLUFI_PASSWORD_MAX_LEN + 1];
@@ -158,23 +161,61 @@ static void join_network(const blufi_sta_config *c)
     cJSON_Delete(p);
     printf("blufi: joining %s\n", ssid);
     blufi_sta_state state = BLUFI_STA_DISCONNECTED;
-    char url[64] = "";
+    char ip[32] = "";
     for (int i = 0; r && i < JOIN_S * 2 && state != BLUFI_STA_CONNECTED; i++) {
         os_sleep(0.5);
         cJSON *s = wifi("wifi.status", NULL);
         const char *now = field(s, "ip");
         if (!strcmp(field(s, "state"), "COMPLETED") && !strcmp(field(s, "ssid"), ssid)) {
             state = now[0] && strcmp(now, "0.0.0.0") ? BLUFI_STA_CONNECTED : BLUFI_STA_NO_IP;
-            snprintf(url, sizeof url, "url: http://%s", now);
+            snprintf(ip, sizeof ip, "%s", now);
         }
         cJSON_Delete(s);
     }
     cJSON_Delete(r);
-    printf("blufi: %s %s %s\n", ssid, state == BLUFI_STA_CONNECTED ? "joined" : "not joined", url);
+    printf("blufi: %s %s %s\n", ssid, state == BLUFI_STA_CONNECTED ? "joined" : "not joined", ip);
     os_lock(&lock);
     blufi_protocol_report_wifi_status(protocol, state, (const uint8_t *)ssid, strlen(ssid), NULL, 0);
-    if (state == BLUFI_STA_CONNECTED) blufi_protocol_send_custom(protocol, (const uint8_t *)url, strlen(url));
     os_unlock(&lock);
+    if (state != BLUFI_STA_CONNECTED) return;
+
+    /* xiaozhi asks its server again within 10 s of the duck being on a network: up to 20 s for its
+     * activation code, or for it to be activated already (no code). */
+    char code[16] = "", url[48];
+    for (int i = 0; i < 40; i++) {
+        const char *err = NULL;
+        cJSON *s = api_call(SRC_WEB, "xiaozhi.status", NULL, &err);
+        const char *xz = field(s, "state");
+        snprintf(code, sizeof code, "%s", field(s, "activation_code"));
+        const int done = err || code[0] || (strcmp(xz, "checking") && strcmp(xz, "unavailable"));
+        cJSON_Delete(s);
+        if (done) break;
+        os_sleep(0.5);
+    }
+    snprintf(url, sizeof url, "http://%s", ip);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "code", code);
+    cJSON_AddStringToObject(o, "ip", ip);
+    cJSON_AddStringToObject(o, "url", url);
+    char *text = cJSON_PrintUnformatted(o);
+    printf("blufi: to the phone %s\n", text);
+    os_lock(&lock);
+    blufi_protocol_send_custom(protocol, (const uint8_t *)text, strlen(text));
+    os_unlock(&lock);
+    cJSON_free(text);
+    cJSON_Delete(o);
+
+    /* Then the hotspot closes, as the web page closes it, and BLE with it (unless it stays open);
+     * a moment first for the phone to have the data. */
+    os_sleep(2);
+    cJSON *w = wifi("wifi.status", NULL);
+    const int always = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(w, "ap_always"));
+    cJSON_Delete(w);
+    if (always) return;
+    cJSON *off = cJSON_CreateObject();
+    cJSON_AddFalseToObject(off, "on");
+    cJSON_Delete(wifi("wifi.ap", off));
+    cJSON_Delete(off);
 }
 
 /* BLE up while the hotspot is, and what the phone asked for. */
@@ -184,15 +225,20 @@ static void task(void *arg)
     double retry_at = 0;
     for (;;) {
         os_sleep(0.5);
-        char name[40];
         blufi_sta_config c;
         os_lock(&lock);
         const int open = hotspot, join_now = join_wanted, scan_now = scan_wanted;
-        snprintf(name, sizeof name, "BLUFI-%s", hotspot_name);
         c = wanted;
         join_wanted = scan_wanted = 0;
         os_unlock(&lock);
         if (open && !ble && os_now() >= retry_at) {
+            char mac[18], name[24] = "DTXZ_";
+            os_device_id(mac);
+            int n = 5;
+            for (int i = 0; mac[i]; i++) {
+                if (mac[i] != ':') name[n++] = mac[i];
+            }
+            name[n] = 0;
             start_ble(name);
             if (!ble) retry_at = os_now() + RETRY_S;
         }
@@ -205,10 +251,10 @@ static void task(void *arg)
 
 static void on_event(int ev, const char *text)
 {
+    (void)text;
     if (ev != EV_HOTSPOT_OPEN && ev != EV_HOTSPOT_CLOSED) return;
     os_lock(&lock);
     hotspot = ev == EV_HOTSPOT_OPEN;
-    if (hotspot) snprintf(hotspot_name, sizeof hotspot_name, "%s", text);
     os_unlock(&lock);
 }
 

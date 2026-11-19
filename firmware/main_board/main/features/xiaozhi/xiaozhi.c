@@ -46,6 +46,7 @@ static const char *const STATE_NAMES[] = {"unavailable", "checking", "activating
 static os_mutex_t lock = OS_MUTEX_INIT;
 static int state = XZ_CHECKING;
 static int interrupts; /* times the wake word cut the duck off, for the web page's log */
+static int dropping;   /* a conversation ended for a network setup: what the server sends is dropped until it closes */
 static char ota_url[160] = "https://api.tenclass.net/xiaozhi/ota/";
 static char device_id[32], client_id[40], ws_url[160], token[160], session[64];
 static char reason[128], code[16], code_message[160], last_stt[256], last_tts[256], emotion[24];
@@ -79,9 +80,10 @@ static void set_state(int s, const char *why)
 }
 
 /*
- * Device-Id: a random MAC (locally administered), and Client-Id: a random UUID,
- * each made once and kept in data/. xiaozhi.me knows a device by its Device-Id,
- * so the factory reset, which removes them, makes the duck a new device to activate.
+ * Device-Id: the Wi-Fi MAC (wlan0), so the duck stays the same device at xiaozhi.me,
+ * through a factory reset too; with no wlan0 (a PC), a random MAC (locally
+ * administered) made once and kept in data/. Client-Id: a random UUID, made once
+ * and kept in data/.
  */
 static void load_ids(void)
 {
@@ -89,7 +91,9 @@ static void load_ids(void)
     FILE *f = fopen("/dev/urandom", "rb");
     if (!f || fread(r, 1, sizeof r, f) != sizeof r) printf("xiaozhi: /dev/urandom not read\n");
     if (f) fclose(f);
-    if (store_kv_get("xz_device.txt", device_id, sizeof device_id) != 17) {
+    /* At boot the Wi-Fi driver loads after the app starts. */
+    for (int i = 0; i < 30 && os_device_id(device_id) != 0; i++) os_sleep(1);
+    if (!device_id[0] && store_kv_get("xz_device.txt", device_id, sizeof device_id) != 17) {
         snprintf(device_id, sizeof device_id, "%02x:%02x:%02x:%02x:%02x:%02x", (r[0] & 0xFC) | 0x02, r[1], r[2], r[3], r[4], r[5]);
         store_kv_set("xz_device.txt", device_id);
     }
@@ -224,6 +228,9 @@ static void connect_task(void *arg)
     snprintf(h_cli, sizeof h_cli, "Client-Id: %s", client_id);
     const char *const headers[] = {h_auth, "Protocol-Version: 1", h_dev, h_cli, NULL};
     if (net_ws_connect(ws_url, headers, &WS) != 0) {
+        os_lock(&lock);
+        dropping = 0;
+        os_unlock(&lock);
         set_state(XZ_READY, "ws_failed");
         return;
     }
@@ -235,11 +242,23 @@ static void connect_task(void *arg)
 static void on_event(int ev, const char *text)
 {
     (void)text;
+    /* The network is being set up: the conversation ends at once (tick() closes it), its speech is dropped. */
+    if (ev == EV_HOTSPOT_OPENING) {
+        os_lock(&lock);
+        if (state == XZ_CONNECTING || state == XZ_LISTENING || state == XZ_SPEAKING) {
+            dropping = 1;
+            state = XZ_READY;
+        }
+        play_until = 0;
+        os_unlock(&lock);
+        sound_speech_stop();
+        return;
+    }
     if (ev != EV_WAKE && ev != EV_WAKE_IDLE) return;
     os_lock(&lock);
     const int s = state;
     last_activity = os_now();
-    const int start = ev == EV_WAKE_IDLE && s == XZ_READY;
+    const int start = ev == EV_WAKE_IDLE && s == XZ_READY && !dropping;
     const int interrupt = ev == EV_WAKE && (s == XZ_LISTENING || s == XZ_SPEAKING);
     if (start) {
         state = XZ_CONNECTING;
@@ -267,8 +286,10 @@ static int tick(void)
     os_lock(&lock);
     const int live = state == XZ_CONNECTING || state == XZ_LISTENING || state == XZ_SPEAKING;
     if (moving || state == XZ_SPEAKING) last_activity = os_now();
-    const int expired = live && os_now() - last_activity > window_s;
+    const int expired = live && os_now() - last_activity > window_s, drop = dropping;
     os_unlock(&lock);
+    /* Until the socket of a conversation ended for a network setup is open, then closed (on_closed). */
+    if (drop) net_ws_close();
     if (!expired) return 0;
     net_ws_close();
     set_state(XZ_READY, NULL);
@@ -322,6 +343,10 @@ static void copy_text(char *dst, size_t size, const cJSON *root, const char *key
 
 static void on_text(const char *text)
 {
+    os_lock(&lock);
+    const int drop = dropping;
+    os_unlock(&lock);
+    if (drop) return;
     cJSON *root = cJSON_Parse(text);
     const cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
     const char *t = cJSON_IsString(type) ? type->valuestring : "";
@@ -371,6 +396,10 @@ static void on_binary(const uint8_t *data, size_t len)
     const int n = opus_codec_decode(data, (int)len, pcm, 2880);
     const double now = os_now();
     os_lock(&lock);
+    if (dropping) {
+        os_unlock(&lock);
+        return;
+    }
     last_activity = now;
     if (n > 0) play_until = (play_until > now ? play_until : now) + n / 16000.0;
     os_unlock(&lock);
@@ -380,6 +409,7 @@ static void on_binary(const uint8_t *data, size_t len)
 static void on_closed(void)
 {
     os_lock(&lock);
+    dropping = 0;
     if (state == XZ_CONNECTING || state == XZ_LISTENING || state == XZ_SPEAKING) state = XZ_READY;
     os_unlock(&lock);
 }

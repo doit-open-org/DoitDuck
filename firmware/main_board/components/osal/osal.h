@@ -16,5 +16,7 @@ void os_sleep_until(double t);       /* until os_now() >= t */
 int os_thread(void (*fn)(void *), void *arg, int prio, int core);
 void os_lock(os_mutex_t *m);
 void os_unlock(os_mutex_t *m);
+/* The Wi-Fi MAC (wlan0), "10:b0:6e:94:22:4e": 0, or -1 (id "") with no wlan0 (yet). */
+int os_device_id(char id[18]);
 
 #endif

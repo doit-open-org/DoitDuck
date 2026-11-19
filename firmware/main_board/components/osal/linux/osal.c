@@ -81,3 +81,12 @@ void os_unlock(os_mutex_t *m)
 {
     pthread_mutex_unlock(m);
 }
+
+int os_device_id(char id[18])
+{
+    FILE *f = fopen("/sys/class/net/wlan0/address", "r");
+    const int ok = f && fscanf(f, "%17s", id) == 1 && strlen(id) == 17;
+    if (f) fclose(f);
+    if (!ok) id[0] = 0;
+    return ok ? 0 : -1;
+}

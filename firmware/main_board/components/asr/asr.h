@@ -8,7 +8,8 @@
  *   none.c       nothing
  * After a wake word an engine with ASR_CAP_COMMAND listens for command words
  * until window_s passes with none, reports ASR_TIMEOUT and listens for the wake
- * word again. Command words with a model of their own need no wake word.
+ * word again. Command words with a model of their own are reported at any time
+ * (voice runs them only after the wake word).
  */
 #include <stddef.h>
 #include <stdint.h>

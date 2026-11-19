@@ -289,9 +289,9 @@ void sound_speech_stop(void)
 /* Clip k of sounds/say/ (gen_say.py) queued as speech, 60 ms at a time as xiaozhi's comes; each read once and kept. */
 static void say(int k)
 {
-    static const char *const SAY[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "dot", "ip"};
-    static const int16_t *pcm[12];
-    static int len[12];
+    static const char *const SAY[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "dot", "ip", "ap"};
+    static const int16_t *pcm[13];
+    static int len[13];
     if (!pcm[k]) {
         char path[32];
         size_t size = 0;
@@ -301,6 +301,11 @@ static void say(int k)
         if (!pcm[k]) printf("sound: cannot read %s\n", path);
     }
     for (int i = 0; i < len[k]; i += 960) sound_speech(pcm[k] + i, len[k] - i < 960 ? len[k] - i : 960);
+}
+
+void sound_say_ap(void)
+{
+    say(12);
 }
 
 void sound_say_ip(const char *ip)

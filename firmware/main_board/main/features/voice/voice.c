@@ -8,7 +8,8 @@
  * The wake word is posted as EV_WAKE. An engine with no command words (mipk,
  * the xiaozhi version) also posts EV_WAKE_IDLE at once, which starts a xiaozhi
  * conversation. A command with a keyword model of its own ("model", mipk
- * MicroWakeWord, models/<model>.mipk) is heard at any time, with no wake word.
+ * MicroWakeWord, models/<model>.mipk) is heard at any time, but runs only after
+ * the wake word, within window_s, as the others do.
  * With no engine, voice.command from the web page still simulates words.
  */
 #include <stdio.h>
@@ -162,7 +163,7 @@ static void on_audio(const int16_t *pcm, int n)
         printf("voice: %s (%.2f)\n", words, score);
         wake(words, score);
     } else if (ev == ASR_COMMAND) {
-        const char *err = command(words, 1, score);
+        const char *err = command(words, 0, score);
         printf("voice: %s (%.2f) %s\n", words, score, err ? err : "");
     } else if (ev == ASR_TIMEOUT) {
         event_post(EV_LISTEN_TIMEOUT, "");

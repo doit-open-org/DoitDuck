@@ -262,7 +262,7 @@
  "settings.wifi_ap_stop": "关闭热点",
  "settings.wifi_connect": "连接",
  "settings.wifi_failed": "连接失败，请检查密码",
- "settings.wifi_help": "对鸭子说「开始配网」也能打开热点。热点开着时，也可以用手机 App EspBlufi 通过蓝牙配网。",
+ "settings.wifi_help": "对鸭子说「你好小鸭」，再说「开始配网」，也能打开热点。热点开着时，也可以用「四博AI」小程序通过蓝牙配网。",
  "settings.wifi_hotspot": "热点",
  "settings.wifi_ip": "IP 地址",
  "settings.wifi_joined": "已连接 {ssid}，IP：{ip}",

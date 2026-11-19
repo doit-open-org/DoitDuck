@@ -150,7 +150,7 @@ python3 tools/import_policy.py policy.onnx manifest.json --host <IP>            
 
 ### 命令词
 
-机身配置 `voice.commands` 里带 `model` 的命令，不用唤醒，随时说就执行，每个命令词一个 MicroWakeWord 模型（`models/<model>.mipk`）。唤醒词的模型由 `voice.wake_model` 指定。没有 `model` 的命令只在网页语音条里用。加命令词：训练一个 mipk 模型放进 `models/`，再在 `voice.commands` 里加一项：
+机身配置 `voice.commands` 里带 `model` 的命令，先说唤醒词「你好小鸭」，再在 `voice.window_s` 秒内说命令词才执行，每个命令词一个 MicroWakeWord 模型（`models/<model>.mipk`）。唤醒词的模型由 `voice.wake_model` 指定。没有 `model` 的命令只在网页语音条里用。加命令词：训练一个 mipk 模型放进 `models/`，再在 `voice.commands` 里加一项：
 
 ```json
 { "words": "开始配网", "model": "kaishipeiwang", "call": "wifi.ap", "params": { "on": true } }
@@ -164,9 +164,9 @@ python3 tools/import_policy.py policy.onnx manifest.json --host <IP>            
 2. 选择网络、输入密码并连接，页面实时显示连接状态。
 3. 连上后弹窗显示新的 IP，确认后关闭热点。密码错了热点不关，改了再连。
 
-热点开着时，鸭子也用蓝牙广播 `BLUFI-DoitDuck-xxxx`，可以用乐鑫的 EspBlufi App 通过蓝牙配网（BluFi）。
+热点开着时，鸭子也用蓝牙广播 `DTXZ_<Wi-Fi MAC>`（如 `DTXZ_10b06e94224e`，和小智设备号是同一个 MAC），可以用「四博AI」小程序通过蓝牙配网（BluFi）。连上后（最多再等 20 秒小智的激活码）小程序收到自定义数据 `{"code": "571480", "ip": "192.168.1.23", "url": "http://192.168.1.23"}`，`code` 是小智激活码，已激活或没开小智时为空。之后热点和蓝牙一起关闭（勾选「热点常开」时不关）。
 
-没有操作时，鸭子已经在网上的话，热点 10 分钟后自动关闭。勾选「热点常开」后热点一直开着，开机也自动打开，外出没有路由器时手机连热点就能控制。
+没有操作时，鸭子已经在网上的话，热点 5 分钟后自动关闭。勾选「热点常开」后热点一直开着，开机也自动打开，外出没有路由器时手机连热点就能控制。
 
 ## 手势、ToF 和叫声
 

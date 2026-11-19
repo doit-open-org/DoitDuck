@@ -18,7 +18,7 @@ import miniaudio
 
 VOICE = "zh-CN-XiaoxiaoNeural"
 RATE = 16000
-CLIPS = {"ip": "配网成功，请使用浏览器访问", "dot": "点",
+CLIPS = {"ip": "配网成功，请使用浏览器访问", "dot": "点", "ap": "开始配网",
          **{str(i): c for i, c in enumerate("零一二三四五六七八九")}}
 
 

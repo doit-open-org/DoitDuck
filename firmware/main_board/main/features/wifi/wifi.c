@@ -44,7 +44,7 @@
 #define AP_IF "ap0"
 #define AP_CONF "/tmp/wpa_ap.conf"
 #define AP_IP "192.168.4.1"
-#define AP_S 600
+#define AP_S 300
 #define MAX_NETS 24
 #define MAX_LEASES 16
 
@@ -487,6 +487,11 @@ static const char *wifi_ap(int src, const cJSON *p, cJSON *r)
     }
     os_unlock(&lock);
     if (always != was_always) store_kv_set("wifi_ap.txt", always ? "1" : "0");
+    /* Setting the network up starts (not for a hotspot that stays open): xiaozhi stops talking, then it is said at once. */
+    if (on && !was && !always) {
+        event_post(EV_HOTSPOT_OPENING, "");
+        sound_say_ap();
+    }
     if (on && !was) os_thread(hotspot, NULL, 0, -1);
     cJSON_AddStringToObject(r, "ssid", ap_ssid);
     cJSON_AddStringToObject(r, "url", "http://" AP_IP "/");
