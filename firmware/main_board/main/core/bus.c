@@ -18,6 +18,7 @@
 #define ADDR_TEMP_KD 51
 #define ADDR_UNLOCK 0x37
 #define ADDR_PRESENT 0x38
+#define ADDR_VOLTAGE 0x3E /* present voltage, 0.1 V; temperature after it */
 #define PRESENT_LEN 6
 #define TICK 0.01
 /* Replies are awaited from the write() call; the request itself takes up to 1.5 ms on the wire. */
@@ -26,7 +27,8 @@
 /* Accel mg, gyro 0.1 deg/s, sample count, status: read every tick. */
 #define IMU_FAST_ADDR 0x40
 #define IMU_FAST_LEN 15
-/* Gyro bias, battery, calibration command and result, mount roll/pitch: read once per second. */
+/* Gyro bias, calibration command and result, mount roll/pitch: read once per second (its battery field is unused:
+ * the board does not measure it; the servos do). */
 #define IMU_SLOW_ADDR 0x56
 #define IMU_SLOW_LEN 16
 #define IMU_CAL_CMD 0x60
@@ -53,6 +55,7 @@ static uint32_t rx_mask, all_mask;
 static uint16_t pos_raw[MAX_MOTORS];
 static int16_t vel_raw[MAX_MOTORS];
 static int ping_id = -1, ping_seen, read_id = -1, read_seen, read_pos;
+static int volt_id = -1, volt_seen, volt_raw;
 static uint8_t imu_rx[IMU_FAST_LEN + 1];
 static int imu_want = -1, imu_seen;
 
@@ -167,6 +170,12 @@ static void parse_byte(uint8_t b)
             }
             break;
         }
+        /* Voltage and temperature: a servo flags a low voltage, and still gives it. */
+        if (rx_data_len == 4 && sid == volt_id) {
+            volt_raw = rx_buf[5];
+            volt_seen = rx_done = 1;
+            break;
+        }
         /* Only accept the requested 6-byte status, with no device error. */
         if (rx_data_len != 8 || rx_buf[4] != 0) break;
         const uint16_t pos = (uint16_t)(rx_buf[5] | rx_buf[6] << 8);
@@ -231,6 +240,8 @@ void bus_task(void *arg)
     float lv[2], lsum[3], llo[3], lhi[3];
     int level_n = -1;
     double last_t = 0, last_imu = 0, last_healthy = 0, last_slow = 0, hz_t0 = os_now();
+    double last_volt = os_now() - 0.5; /* half a second off the IMU's slow read, not in one tick with it */
+    int volt_next = 0;
     uint16_t imu_count = 0;
     int enabled = 0, prev_enabled = 0, timed_out = 0, bus_mode = MODE_PREVIEW, bus_cal_hold = 0, fusion_ok = 0, ticks = 0;
     int imu_status = 0;
@@ -336,9 +347,25 @@ void bus_task(void *arg)
             if (imu_read(IMU_SLOW_ADDR, IMU_SLOW_LEN)) {
                 os_lock(&d.lock);
                 for (int k = 0; k < 3; k++) d.imu_bias[k] = le16(imu_rx + 2 * k) / 100.0f;
-                d.battery_mv = imu_rx[6] | imu_rx[7] << 8;
                 d.imu_cal_result = imu_rx[11];
                 for (int k = 0; k < 2; k++) d.imu_mount[k] = le16(imu_rx + 12 + 2 * k) / 100.0f;
+                os_unlock(&d.lock);
+            }
+        }
+        /* The battery, as the servos see it: one servo a second in turn, smoothed (the voltage sags as they move). */
+        if (start - last_volt >= 1.0) {
+            const uint8_t r[2] = {ADDR_VOLTAGE, 2};
+            last_volt = start;
+            drain_rx();
+            volt_id = C.id[volt_next];
+            volt_next = (volt_next + 1) % C.n;
+            volt_seen = 0;
+            scs_write((uint8_t)volt_id, 0x02, r, 2);
+            wait_rx(os_now() + REPLY_WAIT);
+            volt_id = -1;
+            if (volt_seen && volt_raw > 0) {
+                os_lock(&d.lock);
+                d.battery_mv = d.battery_mv ? (d.battery_mv * 3 + volt_raw * 100) / 4 : volt_raw * 100;
                 os_unlock(&d.lock);
             }
         }
