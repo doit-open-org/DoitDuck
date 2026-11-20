@@ -1,6 +1,6 @@
 # DoitDuck
 
-基于 [Microduck-kissqy](https://github.com/kissqy/Microduck-kissqy) 的双足机器鸭。Microduck-kissqy 是 [Microduck](https://github.com/pollen-robotics/microduck) 的飞特 HD1910 舵机版本（原版使用 Dynamixel XL330）。DoitDuck 沿用它的机械结构、舵机和动作模型格式，主控换成四博智联 Cove-610（Hi3516CV610），增加了网页控制、语音对话和视觉功能。
+基于 [Microduck](https://github.com/pollen-robotics/microduck) 的双足机器鸭。Microduck-kissqy 是 [Microduck](https://github.com/pollen-robotics/microduck) 的飞特 HD1910 舵机版本（原版使用 Dynamixel XL330）。DoitDuck 沿用它的机械结构、舵机和动作模型格式，主控换成四博智联 Cove-610（Hi3516CV610），增加了网页控制、语音对话和视觉功能。
 
 - 15 个总线舵机和总线 IMU，100 Hz 反馈，50 Hz 运行强化学习策略
 - 行走、摔倒后自动起身、捡东西、翻跟头
@@ -101,7 +101,11 @@ python3 tools/import_policy.py policy.onnx manifest.json --out models/microduck_
 python3 tools/import_policy.py policy.onnx manifest.json --host <IP>   # 导入到运行中的鸭子
 ```
 
-也可以在网页「动作」页导入。导入的动作需要在网页上标为已验证后，语音、小智、手柄才能调用；替换行走、起身前要先卸力。`manifest` 的 `robot.model` 必须在 `policy.compatible_models` 中。第三方模型请注意许可，例如 Microduck-kissqy 的模型仅限个人非商业使用。
+也可以在网页「动作」页导入。
+
+- 导入的动作在网页上标为已验证后，语音、小智、手柄才能调用。
+- 替换行走、起身前先卸力。
+- `manifest` 的 `robot.model` 必须在 `policy.compatible_models` 中。
 
 ## 使用
 
@@ -119,9 +123,29 @@ python3 tools/import_policy.py policy.onnx manifest.json --host <IP>   # 导入�
 
 ### 语音和小智
 
-说「你好小鸭」开始和小智对话。首次使用在「设置 → 小智」获取 6 位激活码，到 [xiaozhi.me](https://xiaozhi.me) 添加设备。小智的设备号是 Wi-Fi MAC，恢复出厂后不变；开机时串口打印 `DoitDuck MAC: 10:b0:6e:94:22:4e`（日志里是 `xiaozhi: Device-Id ...`），生产时可以从这里读取。
+说「你好小鸭」开始和小智对话，对话中可在「控制」页点「挂断」结束。
 
-命令词需要先唤醒，在 `voice.window_s` 秒内说出才执行。每个命令词对应一个 MicroWakeWord 模型，在 `voice.commands` 中配置：
+**激活**：首次使用在「设置 → 小智」获取 6 位激活码，到 [xiaozhi.me](https://xiaozhi.me) 添加设备。设备号是 Wi-Fi MAC，恢复出厂后不变。
+
+**连接**：服务器下发 MQTT 配置时走 MQTT + UDP（音频 AES-128-CTR 加密，丢包时由 Opus 补帧），否则走 WebSocket。
+
+**MCP 工具**：
+
+| 工具 | 作用 |
+| --- | --- |
+| `self.get_device_status` | 音量、电量、Wi-Fi 信号、芯片温度 |
+| `self.audio_speaker.set_volume` | 设置音量 0–100 |
+| `self.duck.get_status` | 模式、是否站立或摔倒、当前动作、电池电压 |
+| `self.duck.get_network` | Wi-Fi、IP、控制台地址、热点、MAC |
+| `self.duck.stand` / `rest` / `stop` | 站起、趴下卸力、停下 |
+| `self.duck.walk` / `turn` | 前后左右走或原地转 1–5 秒 |
+| `self.duck.do_action` | 做已验证的动作 |
+| `self.duck.look` / `mouth` / `quack` | 转头、张闭嘴、叫一声 |
+| `self.camera.take_photo` | 拍照，由服务器的视觉模型解读 |
+
+电量取自舵机电压，按 2S 锂电 `low_battery_v`（6.6 V）到 8.4 V 换算。
+
+**命令词**：需要先唤醒，在 `voice.window_s` 秒内说出才执行。每个命令词对应一个 MicroWakeWord 模型，在 `voice.commands` 中配置：
 
 ```json
 { "words": "开始配网", "model": "kaishipeiwang", "call": "wifi.ap", "params": { "on": true } }
@@ -134,7 +158,7 @@ python3 tools/import_policy.py policy.onnx manifest.json --host <IP>   # 导入�
 未配网时开机自动打开热点；也可以说「你好小鸭，开始配网」，或在「设置 → Wi-Fi」点「热点配网」。热点名为 `DoitDuck-xxxx`，无密码，打开时不影响当前 Wi-Fi 连接。
 
 - **热点**：手机连上后自动弹出设置页（或打开 `http://192.168.4.1/`），选择网络并输入密码，连上后页面显示新 IP 并关闭热点。
-- **蓝牙**：热点打开期间同时广播 `DTXZ_<Wi-Fi MAC>`（如 `DTXZ_10b06e94224e`），用「四博AI」小程序配网。连上后小程序收到 `{"code": "571480", "ip": "192.168.1.23", "url": "http://192.168.1.23"}`，`code` 为小智激活码，已激活时为空；随后热点和蓝牙关闭。
+- **蓝牙**：热点打开期间同时广播 `DTXZ_<Wi-Fi MAC>`（如 `DTXZ_10b06e94224e`），用「四博AI」小程序配网。
 
 已联网时，热点 5 分钟无操作自动关闭。勾选「热点常开」后热点常开，开机也会打开，可在没有路由器时使用。
 
@@ -174,7 +198,8 @@ python3 tools/import_policy.py policy.onnx manifest.json --host <IP>   # 导入�
 | `limits` | 各控制来源的最大速度 |
 | `voice` / `gesture` / `gamepad` / `head_presets` | 语音命令、手势、手柄按键、头部预设 |
 | `sounds` | 事件叫声和主动叫 |
-| `xiaozhi` | 启用开关、OTA 地址 |
+| `low_battery_v` | 低电量阈值（默认 6.6 V），低于时提示，且不能上力 |
+| `xiaozhi` | 启用开关、OTA 地址、`window_s`（多少秒没人说话就结束对话，默认 8） |
 
 ## IMU 小板固件
 
