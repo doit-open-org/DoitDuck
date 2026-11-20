@@ -261,6 +261,14 @@ int sound_muted(void)
     return m;
 }
 
+int sound_playing(void)
+{
+    os_lock(&lock);
+    const int p = os_now() < (clip_end > speech_end ? clip_end : speech_end);
+    os_unlock(&lock);
+    return p;
+}
+
 int sound_speech(const int16_t *pcm, int samples)
 {
     const double now = os_now();

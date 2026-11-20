@@ -13,6 +13,7 @@
 void sound_init(void);
 void sound_event(int ev);          /* the sound robots/<name>.json gives this event, if any */
 int sound_muted(void);             /* a sound is playing, so the mic would hear the duck itself */
+int sound_playing(void);           /* a sound or speech is playing */
 void sound_tick(void);             /* every microphone frame: the mouth, quacks when idle */
 /* xiaozhi's speech (16 kHz): queued behind what is still playing; drops other sounds while it plays. */
 int sound_speech(const int16_t *pcm, int samples);  /* -1: the speaker is not open */
