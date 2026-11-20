@@ -157,13 +157,14 @@ static int scan_results(struct net *nets)
     return n;
 }
 
-/* {state, ssid, ip, ap, ap_ssid, ap_always}: state is wpa_supplicant's (COMPLETED when on a network), or "off". */
+/* {state, ssid, ip, rssi, ap, ap_ssid, ap_always}: state is wpa_supplicant's (COMPLETED when on a network), or "off";
+ * rssi in dBm, 0 off a network. */
 static const char *wifi_status(int src, const cJSON *p, cJSON *r)
 {
     (void)src;
     (void)p;
     static char text[2048];
-    char state[32] = "off", ssid[64] = "", ip[32] = "";
+    char state[32] = "off", ssid[64] = "", ip[32] = "", rssi[16] = "";
     os_lock(&lock);
     const int on = ap_on, always = ap_always;
     os_unlock(&lock);
@@ -172,9 +173,11 @@ static const char *wifi_status(int src, const cJSON *p, cJSON *r)
         field(text, "ssid", ssid, sizeof ssid);
         field(text, "ip_address", ip, sizeof ip);
     }
+    if (!strcmp(state, "COMPLETED") && wpa_cli("signal_poll", text, sizeof text) == 0) field(text, "RSSI", rssi, sizeof rssi);
     cJSON_AddStringToObject(r, "state", state);
     cJSON_AddStringToObject(r, "ssid", ssid);
     cJSON_AddStringToObject(r, "ip", ip);
+    cJSON_AddNumberToObject(r, "rssi", atoi(rssi));
     cJSON_AddBoolToObject(r, "ap", on);
     cJSON_AddStringToObject(r, "ap_ssid", ap_ssid);
     cJSON_AddBoolToObject(r, "ap_always", always);
@@ -526,7 +529,7 @@ static void start(void)
 }
 
 static const struct api_method METHODS[] = {
-    {"wifi.status", wifi_status, 1},
+    {"wifi.status", wifi_status, 0}, /* also by the LLM (mcp.c) */
     {"wifi.scan", wifi_scan, 1},
     {"wifi.connect", wifi_connect, 1},
     {"wifi.ap", wifi_ap, 0}, /* also by voice */

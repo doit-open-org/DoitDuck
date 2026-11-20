@@ -13,6 +13,7 @@
 #include "camera.h"
 #include "config.h"
 #include "duck.h"
+#include "sound.h"
 #include "xiaozhi.h"
 
 #define PHOTO_MAX (512 * 1024)
@@ -84,6 +85,57 @@ static const char *tool_network(const cJSON *args, char *text, size_t n)
     cJSON_PrintPreallocated(o, text, (int)n, 0);
     cJSON_Delete(o);
     cJSON_Delete(s);
+    return NULL;
+}
+
+/*
+ * As xiaozhi-esp32's self.get_device_status, with what the duck has: the speaker's volume, the battery (2S,
+ * low_battery_v empty, 8.4 V full; when the IMU board gives it), the network, the chip's temperature. No screen.
+ */
+static const char *tool_device(const cJSON *args, char *text, size_t n)
+{
+    (void)args;
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(cJSON_AddObjectToObject(o, "audio_speaker"), "volume", sound_volume());
+    os_lock(&d.lock);
+    const int mv = d.battery_mv;
+    os_unlock(&d.lock);
+    if (mv > 0) {
+        const int level = (mv - C.low_battery_mv) * 100 / (8400 - C.low_battery_mv);
+        cJSON *b = cJSON_AddObjectToObject(o, "battery");
+        cJSON_AddNumberToObject(b, "level", level < 0 ? 0 : level > 100 ? 100 : level);
+        cJSON_AddNumberToObject(b, "voltage", mv / 1000.0);
+    }
+    const char *err = NULL;
+    cJSON *s = api_call(SRC_LLM, "wifi.status", NULL, &err);
+    if (!err) {
+        const int rssi = (int)arg_num(s, "rssi", 0);
+        cJSON *w = cJSON_AddObjectToObject(o, "network");
+        cJSON_AddStringToObject(w, "type", "wifi");
+        cJSON_AddStringToObject(w, "ssid", arg_str(s, "ssid"));
+        if (rssi) cJSON_AddStringToObject(w, "signal", rssi >= -60 ? "strong" : rssi >= -70 ? "medium" : "weak");
+    }
+    cJSON_Delete(s);
+    /* The SoC's temperature, from the power manager's "cur_temp:" line. */
+    char line[256];
+    FILE *f = fopen("/proc/umap/pm", "r");
+    while (f && fgets(line, sizeof line, f)) {
+        const char *t = strstr(line, "cur_temp:");
+        if (t) cJSON_AddNumberToObject(cJSON_AddObjectToObject(o, "chip"), "temperature", atoi(t + 9));
+        if (t) break;
+    }
+    if (f) fclose(f);
+    cJSON_PrintPreallocated(o, text, (int)n, 0);
+    cJSON_Delete(o);
+    return NULL;
+}
+
+static const char *tool_volume(const cJSON *args, char *text, size_t n)
+{
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(args, "volume");
+    if (!cJSON_IsNumber(v) || v->valuedouble < 0 || v->valuedouble > 100) return "volume 是 0 到 100 的整数";
+    sound_set_volume(v->valueint);
+    snprintf(text, n, "音量已调到 %d", sound_volume());
     return NULL;
 }
 
@@ -214,6 +266,15 @@ static const struct {
     const char *name, *description, *schema;
     const char *(*fn)(const cJSON *args, char *text, size_t n);
 } TOOLS[] = {
+    {"self.get_device_status",
+     "查询设备的实时信息：扬声器音量（0-100）、电池电量、网络（Wi-Fi 名称和信号强弱）、芯片温度。"
+     "用户问音量多大、电量还剩多少、Wi-Fi 信号好不好、设备热不热时调用；调音量前先用它查当前音量。",
+     "{\"type\":\"object\",\"properties\":{}}", tool_device},
+    {"self.audio_speaker.set_volume",
+     "设置扬声器音量，0 到 100，100 最大。用户说大声点、小声点时，先调用 self.get_device_status 查到当前音量，"
+     "再在它的基础上加减 10 到 20。",
+     "{\"type\":\"object\",\"properties\":{\"volume\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":100}},"
+     "\"required\":[\"volume\"]}", tool_volume},
     {"self.duck.get_status", "查询机器鸭当前状态：模式、是否上力站立、是否摔倒、正在做的动作、电池电压。",
      "{\"type\":\"object\",\"properties\":{}}", tool_status},
     {"self.duck.get_network", "查询机器鸭的网络信息：连的 Wi-Fi、IP 地址、网页控制台地址、热点是否打开、MAC 地址。"

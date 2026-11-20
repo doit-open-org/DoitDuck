@@ -60,6 +60,7 @@ static struct sound sounds[MAX_SOUNDS];
 static int nsounds;
 static char event_sound[EV_COUNT][24];
 static float volume_db;
+static int volume = 100; /* the speaker's, 0..100, on everything played: (volume / 100)^2 */
 static int idle_on;
 static double idle_after = 120, idle_min = 60, idle_max = 180;
 static char idle_pick[4][24];
@@ -155,6 +156,8 @@ static void load_settings(const cJSON *s)
 {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(s, "volume_db");
     if (cJSON_IsNumber(v)) volume_db = (float)v->valuedouble;
+    v = cJSON_GetObjectItemCaseSensitive(s, "volume");
+    if (cJSON_IsNumber(v)) volume = v->valueint < 0 ? 0 : v->valueint > 100 ? 100 : v->valueint;
     v = cJSON_GetObjectItemCaseSensitive(s, "idle");
     if (cJSON_IsBool(v)) idle_on = cJSON_IsTrue(v);
 }
@@ -227,7 +230,7 @@ static const char *play(int k, int pri)
     const struct sound *s = &sounds[k];
     const int16_t *p = s->user ? s->user : s->pcm;
     const int n = s->user ? s->user_n : s->n;
-    const float gain = powf(10, volume_db / 20);
+    const float gain = powf(10, volume_db / 20) * (volume / 100.0f) * (volume / 100.0f);
     for (int i = 0; i < n; i++) {
         const float v = p[i] * gain;
         buf[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
@@ -275,8 +278,43 @@ int sound_speech(const int16_t *pcm, int samples)
         speech_acc_n = 0;
     }
     speech_end += (double)samples / RATE;
+    const float gain = (volume / 100.0f) * (volume / 100.0f);
     os_unlock(&lock);
-    return audio_stream(pcm, samples);
+    /* At the speaker's volume, 60 ms at a time. */
+    int16_t out[960];
+    for (int i = 0; i < samples; i += 960) {
+        const int n = samples - i < 960 ? samples - i : 960;
+        for (int j = 0; j < n; j++) out[j] = (int16_t)(pcm[i + j] * gain);
+        if (audio_stream(out, n) != 0) return -1;
+    }
+    return 0;
+}
+
+int sound_volume(void)
+{
+    os_lock(&lock);
+    const int v = volume;
+    os_unlock(&lock);
+    return v;
+}
+
+/* data/sound.json, read at start. */
+static void save_settings(void)
+{
+    char text[128];
+    os_lock(&lock);
+    snprintf(text, sizeof text, "{\"volume_db\": %.1f, \"volume\": %d, \"idle\": %s}\n", volume_db, volume,
+             idle_on ? "true" : "false");
+    os_unlock(&lock);
+    store_kv_set("sound.json", text);
+}
+
+void sound_set_volume(int v)
+{
+    os_lock(&lock);
+    volume = v < 0 ? 0 : v > 100 ? 100 : v;
+    os_unlock(&lock);
+    save_settings();
 }
 
 void sound_speech_stop(void)
@@ -424,6 +462,7 @@ static const char *sound_list(int src, const cJSON *p, cJSON *r)
         if (EVENTS[k]) cJSON_AddStringToObject(events, EVENTS[k], event_sound[k]);
     }
     cJSON_AddNumberToObject(r, "volume_db", volume_db);
+    cJSON_AddNumberToObject(r, "volume", volume);
     cJSON_AddBoolToObject(r, "idle", idle_on);
     os_unlock(&lock);
     return NULL;
@@ -487,14 +526,12 @@ static const char *sound_settings(int src, const cJSON *p, cJSON *r)
     (void)src;
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(p, "volume_db");
     if (v && !(cJSON_IsNumber(v) && v->valuedouble >= -40 && v->valuedouble <= 10)) return "bad_volume";
-    char text[96];
     os_lock(&lock);
     load_settings(p);
-    snprintf(text, sizeof text, "{\"volume_db\": %.1f, \"idle\": %s}\n", volume_db, idle_on ? "true" : "false");
     cJSON_AddNumberToObject(r, "volume_db", volume_db);
     cJSON_AddBoolToObject(r, "idle", idle_on);
     os_unlock(&lock);
-    store_kv_set("sound.json", text);
+    save_settings();
     return NULL;
 }
 
