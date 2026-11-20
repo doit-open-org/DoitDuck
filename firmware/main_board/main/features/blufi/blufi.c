@@ -23,12 +23,12 @@
 #include "feature.h"
 
 #define JOIN_S 60   /* how long the duck has to get on the network */
-#define RETRY_S 30  /* BLE not up yet (at boot hci0 comes after the program): try again after this */
+#define RETRY_S 2   /* BLE not up yet (at boot hci0 comes after the program, or the adapter Busy): try again after this */
 
 static os_mutex_t lock = OS_MUTEX_INIT; /* the protocol and the state below */
 static blufi_protocol *protocol;
 static blufi_ble *ble;
-static int hotspot;                     /* the hotspot is up (EV_HOTSPOT_OPEN) */
+static int hotspot;                     /* the hotspot is opening or up (EV_HOTSPOT_OPENING, EV_HOTSPOT_OPEN) */
 static blufi_sta_config wanted;         /* a network from the phone, for task() to join */
 static int join_wanted, scan_wanted;
 
@@ -252,9 +252,9 @@ static void task(void *arg)
 static void on_event(int ev, const char *text)
 {
     (void)text;
-    if (ev != EV_HOTSPOT_OPEN && ev != EV_HOTSPOT_CLOSED) return;
+    if (ev != EV_HOTSPOT_OPENING && ev != EV_HOTSPOT_OPEN && ev != EV_HOTSPOT_CLOSED) return;
     os_lock(&lock);
-    hotspot = ev == EV_HOTSPOT_OPEN;
+    hotspot = ev != EV_HOTSPOT_CLOSED;
     os_unlock(&lock);
 }
 

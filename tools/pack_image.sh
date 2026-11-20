@@ -5,7 +5,7 @@
 # output/images/flash) and leaves it as it is: its root filesystem is copied,
 # DoitDuck added to the copy (/root/doitduck, S40app's APP_PATH, S52wifi), and
 # the UBI image made again the way Buildroot makes it. The U-Boot environment
-# boots with 'sdio1-pins none', which the servo bus needs. Build DoitDuck for
+# boots with 'sdio1-pins none', which the servo bus needs, and no boot delay. Build DoitDuck for
 # the board first (firmware/main_board/out/doitduck).
 #
 #   sh tools/pack_image.sh [V610-Buildroot]     # default: ../../../.. from here
@@ -53,14 +53,15 @@ echo "pack_image: making the root filesystem"
 sed -e "s;BR2_ROOTFS_UBIFS_PATH;$OUT/rootfs.ubifs;" "$BR/board/cove_610/ubinize.cfg" > "$OUT/ubinize.cfg"
 "$HOST/sbin/ubinize" -o "$OUT/rootfs.ubi" -m 0x800 -p 0x20000 "$OUT/ubinize.cfg"
 
-# The other flash files as built; the root filesystem ours; the environment with sdio1_pins=none.
+# The other flash files as built; the root filesystem ours; the environment with sdio1_pins=none and
+# bootdelay=0 (a key held down at power-on still stops in U-Boot).
 cp "$BR/output/images/flash/"* "$OUT/flash/"
 ROOTFS="$OUT/flash/rootfs_${CHIP}_${NAND_PAGE}_${NAND_BLOCK}_$((ROOTFS_SIZE / 1048576))M.ubifs"
 [ -f "$ROOTFS" ] || { echo "pack_image: no $(basename "$ROOTFS") in output/images/flash" >&2; exit 1; }
 cp "$OUT/rootfs.ubi" "$ROOTFS"
 size=$(stat -c %s "$ROOTFS")
 [ "$size" -le "$ROOTFS_SIZE" ] || { echo "pack_image: root filesystem $size bytes, partition $ROOTFS_SIZE" >&2; exit 1; }
-sed -i 's/^sdio1_pins=.*/sdio1_pins=none/' "$OUT/flash/nand_env.txt"
+sed -i 's/^sdio1_pins=.*/sdio1_pins=none/; s/^bootdelay=.*/bootdelay=0/' "$OUT/flash/nand_env.txt"
 "$HOST/bin/mkenvimage" -s "$ENV_IMAGE_SIZE" -o "$OUT/flash/nand_env.bin" "$OUT/flash/nand_env.txt"
 
 rm -rf "$OUT/target"

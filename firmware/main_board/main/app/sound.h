@@ -15,9 +15,9 @@ void sound_event(int ev);          /* the sound robots/<name>.json gives this ev
 int sound_muted(void);             /* a sound is playing, so the mic would hear the duck itself */
 void sound_tick(void);             /* every microphone frame: the mouth, quacks when idle */
 /* xiaozhi's speech (16 kHz): queued behind what is still playing; drops other sounds while it plays. */
-void sound_speech(const int16_t *pcm, int samples);
+int sound_speech(const int16_t *pcm, int samples);  /* -1: the speaker is not open */
 void sound_speech_stop(void);      /* drops the queued speech at once */
-void sound_say_ap(void);            /* "开始配网", queued as speech */
+void sound_say_ap(void);            /* "开始配网", queued as speech (at boot, once the speaker opens) */
 void sound_say_ip(const char *ip);  /* "配网成功，请使用浏览器访问" and the address, queued as speech */
 
 extern const struct api_method SOUND_METHODS[];

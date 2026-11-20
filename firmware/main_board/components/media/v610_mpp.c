@@ -31,6 +31,9 @@ static mipk_video *hand_model;
 static int hand_bound;
 static int video_ok, closed;
 static int no_camera; /* none answered: the engine runs audio only */
+/* The engine is open, for the threads that play: only audio_read (the microphone's thread) opens it,
+ * as two threads opening it at once hang in the SDK. */
+static int audio_ok;
 
 static void close_audio(void);
 
@@ -84,7 +87,10 @@ static int open_audio(void)
         media = NULL;
         return -1;
     }
-    if (no_camera) return 0;
+    if (no_camera) {
+        __atomic_store_n(&audio_ok, 1, __ATOMIC_RELEASE);
+        return 0;
+    }
     /* Like the audio, the camera's first open after another process has used it fails; it opens on a retry. */
     for (int i = 0; i < 3; i++) {
         if (i) os_sleep(1);
@@ -109,11 +115,13 @@ static int open_audio(void)
         close_audio();
         return -1;
     }
+    __atomic_store_n(&audio_ok, 1, __ATOMIC_RELEASE);
     return 0;
 }
 
 static void close_audio(void)
 {
+    __atomic_store_n(&audio_ok, 0, __ATOMIC_RELEASE);
     if (video_ok) media_video_close(media);
     video_ok = 0;
     media_audio_output_close(media);
@@ -144,7 +152,7 @@ int audio_read(int16_t *pcm, int samples)
 
 int audio_play(const int16_t *pcm, int samples, int rate)
 {
-    if (rate != 16000 || (!media && open_audio() != 0)) return -1;
+    if (rate != 16000 || !__atomic_load_n(&audio_ok, __ATOMIC_ACQUIRE)) return -1;
     const media_status st = media_audio_play_memory(media, MEDIA_AUDIO_FORMAT_PCM_S16LE, pcm, (size_t)samples * 2);
     if (st != MEDIA_OK) printf("audio: play failed: %s\n", media_status_string(st));
     return st == MEDIA_OK ? 0 : -1;
@@ -152,7 +160,7 @@ int audio_play(const int16_t *pcm, int samples, int rate)
 
 int audio_stream(const int16_t *pcm, int samples)
 {
-    if (!media && open_audio() != 0) return -1;
+    if (!__atomic_load_n(&audio_ok, __ATOMIC_ACQUIRE)) return -1;
     const media_status st = media_audio_output_write(media, pcm, (size_t)samples, 1000);
     if (st != MEDIA_OK) printf("audio: stream failed: %s\n", media_status_string(st));
     return st == MEDIA_OK ? 0 : -1;
@@ -160,7 +168,7 @@ int audio_stream(const int16_t *pcm, int samples)
 
 void audio_flush(void)
 {
-    if (media) media_audio_play_stop(media);
+    if (__atomic_load_n(&audio_ok, __ATOMIC_ACQUIRE)) media_audio_play_stop(media);
 }
 
 int camera_h264_read(uint8_t *buf, int size, int *key_frame)
@@ -267,6 +275,7 @@ void camera_lines(const float (*seg)[4], int n, uint32_t rgb)
 void audio_close(void)
 {
     closed = 1;
+    __atomic_store_n(&audio_ok, 0, __ATOMIC_RELEASE);
     if (!media) return;
     media_context *m = media;
     const int v = video_ok;

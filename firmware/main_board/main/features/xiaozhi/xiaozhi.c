@@ -97,6 +97,13 @@ static void load_ids(void)
         snprintf(device_id, sizeof device_id, "%02x:%02x:%02x:%02x:%02x:%02x", (r[0] & 0xFC) | 0x02, r[1], r[2], r[3], r[4], r[5]);
         store_kv_set("xz_device.txt", device_id);
     }
+    /* In the log, and on the serial console for the production line (activating xiaozhi by MAC). */
+    printf("xiaozhi: Device-Id %s\n", device_id);
+    FILE *c = fopen("/dev/console", "w");
+    if (c) {
+        fprintf(c, "DoitDuck MAC: %s\n", device_id);
+        fclose(c);
+    }
     if (store_kv_get("xz_client.txt", client_id, sizeof client_id) == 36) return;
     /* UUID version 4: r[6..21], with the version and variant bits set. */
     r[12] = (r[12] & 0x0F) | 0x40;
@@ -179,6 +186,7 @@ static int check_version(void)
 static void task(void *arg)
 {
     (void)arg;
+    const double started = os_now();
     load_ids();
     for (;;) {
         const char *why = net_unavailable();
@@ -188,9 +196,9 @@ static void task(void *arg)
             continue;
         }
         set_state(XZ_CHECKING, NULL);
-        /* At boot the Wi-Fi joins after the app starts, so retry soon. */
+        /* At boot the Wi-Fi joins after the app starts: retry every 2 s for the first 30 s, then every 10 s. */
         if (check_version() != 0) {
-            os_sleep(10);
+            os_sleep(os_now() - started < 30 ? 2 : 10);
             continue;
         }
         /* An activation code: wait until the user has bound it at xiaozhi.me. */

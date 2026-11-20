@@ -119,7 +119,7 @@ python3 tools/import_policy.py policy.onnx manifest.json --host <IP>   # 导入�
 
 ### 语音和小智
 
-说「你好小鸭」开始和小智对话。首次使用在「设置 → 小智」获取 6 位激活码，到 [xiaozhi.me](https://xiaozhi.me) 添加设备。小智的设备号是 Wi-Fi MAC，恢复出厂后不变。
+说「你好小鸭」开始和小智对话。首次使用在「设置 → 小智」获取 6 位激活码，到 [xiaozhi.me](https://xiaozhi.me) 添加设备。小智的设备号是 Wi-Fi MAC，恢复出厂后不变；开机时串口打印 `DoitDuck MAC: 10:b0:6e:94:22:4e`（日志里是 `xiaozhi: Device-Id ...`），生产时可以从这里读取。
 
 命令词需要先唤醒，在 `voice.window_s` 秒内说出才执行。每个命令词对应一个 MicroWakeWord 模型，在 `voice.commands` 中配置：
 

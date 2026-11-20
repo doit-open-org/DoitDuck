@@ -12,7 +12,7 @@
 #include "cJSON.h"
 #include "feature.h"
 
-#define DOITDUCK_VERSION "0.2.3"
+#define DOITDUCK_VERSION "0.2.4"
 
 /*
  * Runs method with params (may be NULL) for source src (SRC_*). Returns the

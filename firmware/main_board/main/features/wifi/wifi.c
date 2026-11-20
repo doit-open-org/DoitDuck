@@ -357,26 +357,32 @@ static void hotspot(void *arg)
     }
     FILE *f = fopen(AP_CONF, "w");
     if (f) {
-        fprintf(f, "ctrl_interface=/var/run/wpa_supplicant\n\nnetwork={\n    ssid=\"%s\"\n    mode=2\n"
+        /* ap_scan=2: the access point starts at once, with no scan first (5 s on this radio). */
+        fprintf(f, "ctrl_interface=/var/run/wpa_supplicant\nap_scan=2\n\nnetwork={\n    ssid=\"%s\"\n    mode=2\n"
                    "    frequency=2437\n    key_mgmt=NONE\n}\n", ap_ssid);
         fclose(f);
     }
     global("interface_remove " AP_IF); /* left by a program that stopped with the hotspot open */
     int bad = !f || global("interface_add " AP_IF " " AP_CONF " nl80211 /var/run/wpa_supplicant \"\" \"\" create ap") != 0;
-    os_sleep(1);
-    if (!bad) bad = system("ifconfig " AP_IF " " AP_IP " netmask 255.255.255.0 up") != 0;
+    /* AP_IF comes a moment after interface_add. */
+    int configured = 0;
+    for (int i = 0; i < 20 && !bad && !configured; i++) {
+        configured = system("ifconfig " AP_IF " " AP_IP " netmask 255.255.255.0 up 2>/dev/null") == 0;
+        if (!configured) os_sleep(0.1);
+    }
     /* Up once the radio runs it: a radio that refuses leaves AP_IF DISCONNECTED ("Failed to start AP" in dmesg). */
     int up = 0;
-    for (int i = 0; i < 10 && !bad && !up; i++) {
-        os_sleep(0.5);
+    for (int i = 0; i < 50 && configured && !up; i++) {
+        os_sleep(0.1);
         up = system("wpa_cli -i " AP_IF " status 2>/dev/null | grep -q wpa_state=COMPLETED") == 0;
     }
-    if (bad || !up) {
+    if (!up) {
         printf("wifi: the hotspot did not start\n");
         global("interface_remove " AP_IF);
         os_lock(&lock);
         ap_on = 0;
         os_unlock(&lock);
+        event_post(EV_HOTSPOT_CLOSED, ""); /* BLE started with EV_HOTSPOT_OPENING */
         return;
     }
     printf("wifi: hotspot %s up, http://" AP_IP "/\n", ap_ssid);

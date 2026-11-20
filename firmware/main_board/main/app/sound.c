@@ -74,6 +74,7 @@ static double clip_start, clip_end;
 static uint8_t speech_env[SPEECH_ENV];
 static int speech_count, speech_acc_n;
 static double speech_start, speech_end, speech_acc;
+static double ap_asked; /* "开始配网" asked for before the speaker was open (at boot): said once it is, within 30 s */
 /* The mouth angle we last set, or -1 while the mouth is not ours. Only the microphone thread touches it. */
 static float mouth_set = -1;
 static double last_busy, next_idle, next_idle_check, last_by[SRC_COUNT];
@@ -257,7 +258,7 @@ int sound_muted(void)
     return m;
 }
 
-void sound_speech(const int16_t *pcm, int samples)
+int sound_speech(const int16_t *pcm, int samples)
 {
     const double now = os_now();
     os_lock(&lock);
@@ -275,7 +276,7 @@ void sound_speech(const int16_t *pcm, int samples)
     }
     speech_end += (double)samples / RATE;
     os_unlock(&lock);
-    audio_stream(pcm, samples);
+    return audio_stream(pcm, samples);
 }
 
 void sound_speech_stop(void)
@@ -286,8 +287,9 @@ void sound_speech_stop(void)
     audio_flush();
 }
 
-/* Clip k of sounds/say/ (gen_say.py) queued as speech, 60 ms at a time as xiaozhi's comes; each read once and kept. */
-static void say(int k)
+/* Clip k of sounds/say/ (gen_say.py) queued as speech, 60 ms at a time as xiaozhi's comes; each read once and kept.
+ * -1 when the speaker took none of it (not open yet). */
+static int say(int k)
 {
     static const char *const SAY[] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "dot", "ip", "ap"};
     static const int16_t *pcm[13];
@@ -300,12 +302,18 @@ static void say(int k)
         pcm[k] = w ? wav_pcm(w, size, &len[k]) : NULL;
         if (!pcm[k]) printf("sound: cannot read %s\n", path);
     }
-    for (int i = 0; i < len[k]; i += 960) sound_speech(pcm[k] + i, len[k] - i < 960 ? len[k] - i : 960);
+    for (int i = 0; i < len[k]; i += 960) {
+        if (sound_speech(pcm[k] + i, len[k] - i < 960 ? len[k] - i : 960) != 0) return -1;
+    }
+    return 0;
 }
 
 void sound_say_ap(void)
 {
-    say(12);
+    if (say(12) == 0) return;
+    os_lock(&lock);
+    ap_asked = os_now();
+    os_unlock(&lock);
 }
 
 void sound_say_ip(const char *ip)
@@ -369,7 +377,13 @@ void sound_tick(void)
         const int i = (int)((now - clip_start) / ENV_S);
         level = i < clip_nenv ? clip_env[i] : 0;
     }
+    const int say_ap = ap_asked > 0 && now - ap_asked < 30;
+    ap_asked = 0;
     os_unlock(&lock);
+    if (say_ap) {
+        printf("sound: the speaker is open, saying 开始配网\n");
+        say(12);
+    }
     mouth(level);
     idle(now);
 }
