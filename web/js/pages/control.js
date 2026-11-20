@@ -36,7 +36,7 @@ function html() {
     <div class="row"><span id="v-state" class="state grow"></span>
       ${has('voice') ? '<label class="row"><input type="checkbox" id="v-on"><span data-i18n="control.voice_on"></span></label>' : ''}
       <button id="v-wake" data-i18n="control.wake"></button>
-      ${has('xiaozhi') ? '<button id="v-stop" data-i18n="control.interrupt" hidden></button>' : ''}</div>
+      ${has('xiaozhi') ? '<button id="v-stop" data-i18n="control.interrupt" hidden></button><button id="v-hang" class="danger" data-i18n="control.hang_up" hidden></button>' : ''}</div>
     <p id="v-off" class="chip warn" data-i18n="control.voice_off_warn" hidden></p>
     <ul id="v-log" class="log"></ul>
     <div id="quacks" class="quacks"></div>
@@ -193,6 +193,7 @@ function render(s) {
   if ($('#v-on')) $('#v-on').checked = !!v.on;
   $('#v-off').hidden = !has('voice') || !!v.on;
   if ($('#v-stop')) $('#v-stop').hidden = x.state !== 'speaking';
+  if ($('#v-hang')) $('#v-hang').hidden = !['connecting', 'listening', 'speaking'].includes(x.state);
   $('#v-log').innerHTML = remember(s);
 }
 
@@ -227,6 +228,7 @@ export function mount(root) {
   if ($('#v-wake')) {
     $('#v-wake').onclick = () => act(rpc('voice.wake'));
     if ($('#v-stop')) $('#v-stop').onclick = () => act(rpc('voice.wake'));
+    if ($('#v-hang')) $('#v-hang').onclick = () => act(rpc('xiaozhi.hangup'));
     if ($('#v-on')) $('#v-on').onchange = e => act(rpc('voice.enable', {on: e.target.checked}));
     rpc('sound.list').then(r => {
       $('#quacks').innerHTML = r.sounds.filter(q => q.name !== 'tick')

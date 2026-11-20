@@ -1,14 +1,15 @@
 /*
  * The xiaozhi feature: the duck as a xiaozhi device (xiaozhi.me), with OTA
- * check and activation, then a WebSocket conversation with Opus audio both ways
- * and MCP tool calls from the server's LLM (mcp.c). Protocol:
- * github.com/78/xiaozhi-esp32 docs/websocket.md.
+ * check and activation, then a conversation with Opus audio both ways and MCP
+ * tool calls from the server's LLM (mcp.c): over MQTT with the audio on UDP when
+ * the OTA reply has "mqtt", otherwise over the WebSocket. Protocol:
+ * github.com/78/xiaozhi-esp32 docs/mqtt-udp.md and docs/websocket.md.
  *
  * Start-up: POST the OTA endpoint with Device-Id and
  * Client-Id; the reply carries either an activation code (shown on the web
  * page; the user binds the device at xiaozhi.me, then /activate answers 200) or
- * the WebSocket url and token. EV_WAKE_IDLE (the wake word, voice has no command words) opens the
- * WebSocket, sends hello, then listen/start; EV_WAKE interrupts the duck while
+ * the MQTT settings and the WebSocket url and token. EV_WAKE_IDLE (the wake word) connects,
+ * sends hello (on MQTT the server's hello gives the UDP server and key), then listen/start; EV_WAKE interrupts the duck while
  * it speaks; the server answers with stt, tts, Opus audio and MCP calls.
  * The connection is made on its own thread; what the mic hears meanwhile is
  * kept and sent once listening starts, so the first words are not lost.
@@ -49,6 +50,9 @@ static int interrupts; /* times the wake word cut the duck off, for the web page
 static int dropping;   /* a conversation ended for a network setup: what the server sends is dropped until it closes */
 static char ota_url[160] = "https://api.tenclass.net/xiaozhi/ota/";
 static char device_id[32], client_id[40], ws_url[160], token[160], session[64];
+static char mqtt_endpoint[128], mqtt_client[160], mqtt_user[160], mqtt_pass[160], mqtt_topic[64], mqtt_sub[64];
+static int mqtt_keepalive = 240;
+static int mqtt; /* this conversation is on MQTT and UDP, not the WebSocket */
 static char reason[128], code[16], code_message[160], last_stt[256], last_tts[256], emotion[24];
 static int16_t frame[FRAME_SAMPLES];
 static int frame_fill, nbacklog;
@@ -60,6 +64,7 @@ static void on_text(const char *text);
 static void on_binary(const uint8_t *data, size_t len);
 static void on_closed(void);
 static const struct net_ws_handler WS = {on_text, on_binary, on_closed};
+static const struct net_mqtt_handler MQ = {on_text, on_closed};
 
 static int configure(const cJSON *section)
 {
@@ -151,6 +156,12 @@ int xiaozhi_explain(const char *url, const char *token, const char *question, co
     return status;
 }
 
+static void copy_text(char *dst, size_t size, const cJSON *root, const char *key)
+{
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (cJSON_IsString(v)) snprintf(dst, size, "%s", v->valuestring);
+}
+
 /* POST the OTA endpoint and keep what it says; returns 0 when it answered. */
 static int check_version(void)
 {
@@ -178,6 +189,17 @@ static int check_version(void)
     snprintf(code_message, sizeof code_message, "%s", cJSON_IsString(m) ? m->valuestring : "");
     if (cJSON_IsString(u)) snprintf(ws_url, sizeof ws_url, "%s", u->valuestring);
     if (cJSON_IsString(t)) snprintf(token, sizeof token, "%s", t->valuestring);
+    const cJSON *mq = cJSON_GetObjectItemCaseSensitive(root, "mqtt");
+    const cJSON *k = cJSON_GetObjectItemCaseSensitive(mq, "keepalive");
+    mqtt_endpoint[0] = mqtt_sub[0] = 0;
+    copy_text(mqtt_endpoint, sizeof mqtt_endpoint, mq, "endpoint");
+    copy_text(mqtt_client, sizeof mqtt_client, mq, "client_id");
+    copy_text(mqtt_user, sizeof mqtt_user, mq, "username");
+    copy_text(mqtt_pass, sizeof mqtt_pass, mq, "password");
+    copy_text(mqtt_topic, sizeof mqtt_topic, mq, "publish_topic");
+    copy_text(mqtt_sub, sizeof mqtt_sub, mq, "subscribe_topic");
+    if (!strcmp(mqtt_sub, "null")) mqtt_sub[0] = 0;
+    if (cJSON_IsNumber(k)) mqtt_keepalive = k->valueint;
     os_unlock(&lock);
     cJSON_Delete(root);
     return 0;
@@ -214,52 +236,105 @@ static void task(void *arg)
                 os_sleep(5);
             }
         }
-        set_state(ws_url[0] ? XZ_READY : XZ_UNAVAILABLE, ws_url[0] ? NULL : "no_websocket");
+        const int any = ws_url[0] || mqtt_endpoint[0];
+        set_state(any ? XZ_READY : XZ_UNAVAILABLE, any ? NULL : "no_websocket");
         /* Recheck once an hour; the token may change. */
         os_sleep(3600);
     }
+}
+
+/* The conversation's JSON, on MQTT or on the WebSocket. */
+static void send_text(const char *text)
+{
+    if (mqtt) net_mqtt_publish(mqtt_topic, text);
+    else net_ws_send_text(text);
+}
+
+static void send_audio(const uint8_t *data, size_t len)
+{
+    if (mqtt) net_udp_send(data, len);
+    else net_ws_send_binary(data, len);
 }
 
 static void send_json(const char *type, const char *extra)
 {
     char msg[512];
     snprintf(msg, sizeof msg, "{\"session_id\":\"%s\",\"type\":\"%s\"%s}", session, type, extra);
-    net_ws_send_text(msg);
+    send_text(msg);
+}
+
+/* Ends the conversation's connection: on MQTT goodbye, then UDP and MQTT closed; or the WebSocket. */
+static void close_channel(void)
+{
+    if (!mqtt) {
+        net_ws_close();
+        return;
+    }
+    send_json("goodbye", "");
+    net_udp_close();
+    net_mqtt_close();
 }
 
 static void connect_task(void *arg)
 {
     (void)arg;
-    char h_auth[200], h_dev[64], h_cli[64];
-    snprintf(h_auth, sizeof h_auth, "Authorization: Bearer %s", token);
-    snprintf(h_dev, sizeof h_dev, "Device-Id: %s", device_id);
-    snprintf(h_cli, sizeof h_cli, "Client-Id: %s", client_id);
-    const char *const headers[] = {h_auth, "Protocol-Version: 1", h_dev, h_cli, NULL};
-    if (net_ws_connect(ws_url, headers, &WS) != 0) {
+    mqtt = mqtt_endpoint[0] != 0;
+    int r;
+    if (mqtt) {
+        /* "host" or "host:port", 8883 (TLS) by default. */
+        char host[128];
+        const char *port = "8883";
+        snprintf(host, sizeof host, "%s", mqtt_endpoint);
+        char *colon = strchr(host, ':');
+        if (colon) {
+            *colon = 0;
+            port = colon + 1;
+        }
+        r = net_mqtt_connect(host, port, mqtt_client, mqtt_user, mqtt_pass, mqtt_keepalive, mqtt_sub, &MQ);
+    } else {
+        char h_auth[200], h_dev[64], h_cli[64];
+        snprintf(h_auth, sizeof h_auth, "Authorization: Bearer %s", token);
+        snprintf(h_dev, sizeof h_dev, "Device-Id: %s", device_id);
+        snprintf(h_cli, sizeof h_cli, "Client-Id: %s", client_id);
+        const char *const headers[] = {h_auth, "Protocol-Version: 1", h_dev, h_cli, NULL};
+        r = net_ws_connect(ws_url, headers, &WS);
+    }
+    printf("xiaozhi: %s %s\n", mqtt ? "MQTT + UDP" : "WebSocket", r ? "failed" : "connected");
+    if (r != 0) {
         os_lock(&lock);
         dropping = 0;
         os_unlock(&lock);
         set_state(XZ_READY, "ws_failed");
         return;
     }
-    net_ws_send_text("{\"type\":\"hello\",\"version\":1,\"features\":{\"mcp\":true},\"transport\":\"websocket\","
-                     "\"audio_params\":{\"format\":\"opus\",\"sample_rate\":16000,\"channels\":1,\"frame_duration\":60}}");
+    if (mqtt)
+        send_text("{\"type\":\"hello\",\"version\":3,\"transport\":\"udp\",\"features\":{\"mcp\":true},"
+                  "\"audio_params\":{\"format\":\"opus\",\"sample_rate\":16000,\"channels\":1,\"frame_duration\":60}}");
+    else
+        send_text("{\"type\":\"hello\",\"version\":1,\"features\":{\"mcp\":true},\"transport\":\"websocket\","
+                  "\"audio_params\":{\"format\":\"opus\",\"sample_rate\":16000,\"channels\":1,\"frame_duration\":60}}");
     /* listen/start follows the server's hello, in on_text. */
+}
+
+/* The conversation ends at once (tick() closes it), its speech is dropped. */
+static void hang_up(void)
+{
+    os_lock(&lock);
+    if (state == XZ_CONNECTING || state == XZ_LISTENING || state == XZ_SPEAKING) {
+        dropping = 1;
+        state = XZ_READY;
+    }
+    play_until = 0;
+    os_unlock(&lock);
+    sound_speech_stop();
 }
 
 static void on_event(int ev, const char *text)
 {
     (void)text;
-    /* The network is being set up: the conversation ends at once (tick() closes it), its speech is dropped. */
+    /* The network is being set up: the conversation ends. */
     if (ev == EV_HOTSPOT_OPENING) {
-        os_lock(&lock);
-        if (state == XZ_CONNECTING || state == XZ_LISTENING || state == XZ_SPEAKING) {
-            dropping = 1;
-            state = XZ_READY;
-        }
-        play_until = 0;
-        os_unlock(&lock);
-        sound_speech_stop();
+        hang_up();
         return;
     }
     if (ev != EV_WAKE && ev != EV_WAKE_IDLE) return;
@@ -297,9 +372,9 @@ static int tick(void)
     const int expired = live && os_now() - last_activity > window_s, drop = dropping;
     os_unlock(&lock);
     /* Until the socket of a conversation ended for a network setup is open, then closed (on_closed). */
-    if (drop) net_ws_close();
+    if (drop) close_channel();
     if (!expired) return 0;
-    net_ws_close();
+    close_channel();
     set_state(XZ_READY, NULL);
     return 1;
 }
@@ -320,7 +395,7 @@ static void on_audio(const int16_t *pcm, int samples)
         return;
     }
     if (s == XZ_LISTENING) {
-        for (int i = 0; i < nbacklog; i++) net_ws_send_binary(backlog[i], (size_t)backlog_len[i]);
+        for (int i = 0; i < nbacklog; i++) send_audio(backlog[i], (size_t)backlog_len[i]);
         nbacklog = 0;
     }
     while (samples > 0) {
@@ -335,18 +410,12 @@ static void on_audio(const int16_t *pcm, int samples)
         const int len = opus_codec_encode(frame, FRAME_SAMPLES, opus, sizeof opus);
         if (len <= 0) continue;
         if (s == XZ_LISTENING) {
-            net_ws_send_binary(opus, (size_t)len);
+            send_audio(opus, (size_t)len);
         } else if (nbacklog < BACKLOG) {
             memcpy(backlog[nbacklog], opus, (size_t)len);
             backlog_len[nbacklog++] = len;
         }
     }
-}
-
-static void copy_text(char *dst, size_t size, const cJSON *root, const char *key)
-{
-    const cJSON *v = cJSON_GetObjectItemCaseSensitive(root, key);
-    if (cJSON_IsString(v)) snprintf(dst, size, "%s", v->valuestring);
 }
 
 static void on_text(const char *text)
@@ -363,10 +432,30 @@ static void on_text(const char *text)
     last_activity = os_now();
     if (!strcmp(t, "hello")) {
         copy_text(session, sizeof session, root, "session_id");
-        state = XZ_LISTENING;
         os_unlock(&lock);
-        send_json("listen", LISTEN_START);
+        /* On MQTT the audio goes over UDP: to the server, and with the key and nonce, the hello gives. */
+        int ok = 1;
+        if (mqtt) {
+            const cJSON *u = cJSON_GetObjectItemCaseSensitive(root, "udp");
+            const cJSON *port = cJSON_GetObjectItemCaseSensitive(u, "port");
+            const char *server = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(u, "server"));
+            const char *k = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(u, "key"));
+            const char *nc = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(u, "nonce"));
+            uint8_t key[16] = {0}, nonce[16] = {0};
+            ok = server && k && nc && strlen(k) == 32 && strlen(nc) == 32 && cJSON_IsNumber(port);
+            for (int i = 0; ok && i < 16; i++)
+                ok = sscanf(k + 2 * i, "%2hhx", &key[i]) == 1 && sscanf(nc + 2 * i, "%2hhx", &nonce[i]) == 1;
+            ok = ok && net_udp_open(server, port->valueint, key, nonce, on_binary) == 0;
+            if (!ok) printf("xiaozhi: no UDP audio from the server's hello\n");
+        }
         os_lock(&lock);
+        if (ok) state = XZ_LISTENING;
+        else dropping = 1; /* tick() closes it */
+        os_unlock(&lock);
+        if (ok) send_json("listen", LISTEN_START);
+        os_lock(&lock);
+    } else if (!strcmp(t, "goodbye")) {
+        dropping = 1; /* the server ended the conversation: tick() closes it */
     } else if (!strcmp(t, "stt")) {
         copy_text(last_stt, sizeof last_stt, root, "text");
     } else if (!strcmp(t, "llm")) {
@@ -390,7 +479,7 @@ static void on_text(const char *text)
             cJSON_AddStringToObject(msg, "type", "mcp");
             cJSON_AddItemToObject(msg, "payload", resp);
             char *out = cJSON_PrintUnformatted(msg);
-            net_ws_send_text(out);
+            send_text(out);
             cJSON_free(out);
             cJSON_Delete(msg);
         }
@@ -401,7 +490,8 @@ static void on_text(const char *text)
 static void on_binary(const uint8_t *data, size_t len)
 {
     int16_t pcm[2880]; /* up to 180 ms at 16 kHz */
-    const int n = opus_codec_decode(data, (int)len, pcm, 2880);
+    /* A packet lost on UDP (data NULL): the decoder fills in one frame, 60 ms. */
+    const int n = opus_codec_decode(data, (int)len, pcm, data ? 2880 : FRAME_SAMPLES);
     const double now = os_now();
     os_lock(&lock);
     if (dropping) {
@@ -416,6 +506,7 @@ static void on_binary(const uint8_t *data, size_t len)
 
 static void on_closed(void)
 {
+    if (mqtt) net_udp_close();
     os_lock(&lock);
     dropping = 0;
     if (state == XZ_CONNECTING || state == XZ_LISTENING || state == XZ_SPEAKING) state = XZ_READY;
@@ -442,6 +533,7 @@ static const char *xiaozhi_status(int src, const cJSON *p, cJSON *r)
     cJSON_AddStringToObject(r, "state", STATE_NAMES[state]);
     cJSON_AddStringToObject(r, "reason", reason);
     cJSON_AddStringToObject(r, "ota_url", ota_url);
+    cJSON_AddStringToObject(r, "transport", mqtt_endpoint[0] ? "mqtt+udp" : ws_url[0] ? "websocket" : "");
     cJSON_AddStringToObject(r, "device_id", device_id);
     cJSON_AddStringToObject(r, "client_id", client_id);
     cJSON_AddStringToObject(r, "activation_code", code);
@@ -462,6 +554,16 @@ static const char *xiaozhi_mcp(int src, const cJSON *p, cJSON *r)
     return NULL;
 }
 
+/* The web page's hang-up button. */
+static const char *xiaozhi_hangup(int src, const cJSON *p, cJSON *r)
+{
+    (void)src;
+    (void)p;
+    (void)r;
+    hang_up();
+    return NULL;
+}
+
 static void start(void)
 {
     os_thread(task, NULL, 0, -1);
@@ -470,6 +572,7 @@ static void start(void)
 static const struct api_method METHODS[] = {
     {"xiaozhi.status", xiaozhi_status, 1},
     {"xiaozhi.mcp", xiaozhi_mcp, 1},
+    {"xiaozhi.hangup", xiaozhi_hangup, 1},
 };
 
 const struct feature xiaozhi_feature = {
@@ -480,5 +583,5 @@ const struct feature xiaozhi_feature = {
     .on_event = on_event,
     .on_audio = on_audio,
     .methods = METHODS,
-    .nmethods = 2,
+    .nmethods = 3,
 };

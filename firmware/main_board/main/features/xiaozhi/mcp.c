@@ -58,6 +58,35 @@ static const char *tool_status(const cJSON *args, char *text, size_t n)
     return NULL;
 }
 
+/* The network as JSON: {connected, ssid, ip, url, ap, ap_ssid, ap_url, mac}; url is the web console on the
+ * Wi-Fi ("" when not on one), ap_url the one on the hotspot ("" when it is closed). */
+static const char *tool_network(const cJSON *args, char *text, size_t n)
+{
+    (void)args;
+    const char *err = NULL;
+    cJSON *s = api_call(SRC_LLM, "wifi.status", NULL, &err);
+    if (err) return err;
+    const char *ip = arg_str(s, "ip");
+    const int connected = ip[0] && strcmp(ip, "0.0.0.0");
+    const int ap = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(s, "ap"));
+    char url[48] = "", mac[18];
+    if (connected) snprintf(url, sizeof url, "http://%s", ip);
+    os_device_id(mac);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "connected", connected);
+    cJSON_AddStringToObject(o, "ssid", connected ? arg_str(s, "ssid") : "");
+    cJSON_AddStringToObject(o, "ip", connected ? ip : "");
+    cJSON_AddStringToObject(o, "url", url);
+    cJSON_AddBoolToObject(o, "ap", ap);
+    cJSON_AddStringToObject(o, "ap_ssid", ap ? arg_str(s, "ap_ssid") : "");
+    cJSON_AddStringToObject(o, "ap_url", ap ? "http://192.168.4.1" : "");
+    cJSON_AddStringToObject(o, "mac", mac);
+    cJSON_PrintPreallocated(o, text, (int)n, 0);
+    cJSON_Delete(o);
+    cJSON_Delete(s);
+    return NULL;
+}
+
 static const char *tool_stand(const cJSON *args, char *text, size_t n)
 {
     (void)args;
@@ -187,6 +216,12 @@ static const struct {
 } TOOLS[] = {
     {"self.duck.get_status", "查询机器鸭当前状态：模式、是否上力站立、是否摔倒、正在做的动作、电池电压。",
      "{\"type\":\"object\",\"properties\":{}}", tool_status},
+    {"self.duck.get_network", "查询机器鸭的网络信息：连的 Wi-Fi、IP 地址、网页控制台地址、热点是否打开、MAC 地址。"
+                           "用户问网络、Wi-Fi、IP、控制台、网页、怎么用手机或电脑控制时调用。"
+                           "返回 connected 是否连上 Wi-Fi，ssid Wi-Fi 名，ip，url 同一 Wi-Fi 下的控制台地址，"
+                           "ap 热点是否打开，ap_ssid 热点名，ap_url 连上热点后的控制台地址，mac。"
+                           "没连上 Wi-Fi 时告诉用户说「开始配网」。",
+     "{\"type\":\"object\",\"properties\":{}}", tool_network},
     {"self.duck.stand", "让机器鸭上力站起来，进入行走模式原地站着。走路、做动作前不需要先调用，相关工具会自动进入行走模式。",
      "{\"type\":\"object\",\"properties\":{}}", tool_stand},
     {"self.duck.rest", "让机器鸭趴下休息：所有舵机卸力。用户让它休息、睡觉、放松时调用。",

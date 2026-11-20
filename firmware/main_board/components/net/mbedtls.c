@@ -1,8 +1,9 @@
 /*
  * net.h with Mbed TLS: an HTTPS POST for the OTA and
  * activation requests (plain HTTP too, for the vision url the server gives as
- * http://), and one secure WebSocket (RFC 6455, client side) whose
- * reader thread hands messages to the handler given to net_ws_connect. Server
+ * http://), one secure WebSocket (RFC 6455, client side), one MQTT 3.1.1
+ * connection (TLS on port 8883) and xiaozhi's UDP audio channel; each has a
+ * reader thread that hands what comes to the caller's handler. Server
  * certificates are checked against DigiCert Global Root G2, the root of
  * api.tenclass.net; while the board clock is unset (1970 until NTP) their
  * dates are not checked.
@@ -13,6 +14,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "mbedtls/aes.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/entropy.h"
@@ -55,7 +57,15 @@ static const char ROOT_CA[] =
 struct tls {
     mbedtls_net_context net;
     mbedtls_ssl_context ssl;
-    int plain; /* http://: the socket alone, no TLS */
+    int plain; /* http:// or MQTT off 8883: the socket alone, no TLS */
+};
+
+/* A connection with a reader thread: the WebSocket, MQTT. */
+struct conn {
+    struct tls t;
+    os_mutex_t io; /* one TLS context: reads and writes take turns */
+    volatile int open, stop;
+    void (*idle)(void); /* on the reader's thread while nothing comes, every 0.1 s */
 };
 
 static mbedtls_entropy_context entropy;
@@ -65,10 +75,11 @@ static mbedtls_ssl_config conf;
 static int tls_ready;
 static os_mutex_t init_lock = OS_MUTEX_INIT, rng_lock = OS_MUTEX_INIT;
 
-static struct tls ws;
-static volatile int ws_open, ws_stop;
+static void mqtt_idle(void);
+static struct conn ws = {.io = OS_MUTEX_INIT}, mq = {.io = OS_MUTEX_INIT, .idle = mqtt_idle};
 static struct net_ws_handler handler;
-static os_mutex_t io = OS_MUTEX_INIT; /* one TLS context: reads and writes take turns */
+static struct net_mqtt_handler mq_handler;
+static double mq_keepalive, mq_sent;
 
 static int verify(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t *flags)
 {
@@ -229,26 +240,47 @@ int net_https_post(const char *url, const char *const *headers, const void *body
 }
 
 /* Reads exactly n bytes; -1 when the connection ends or was asked to close. */
-static int ws_read(uint8_t *p, size_t n)
+static int conn_read(struct conn *c, uint8_t *p, size_t n)
 {
     while (n > 0) {
-        if (ws_stop) return -1;
+        if (c->stop) return -1;
         /* Wait outside the lock, so the senders are not held up by an idle line. */
-        if (!mbedtls_ssl_get_bytes_avail(&ws.ssl)) {
-            struct pollfd pf = {.fd = ws.net.fd, .events = POLLIN};
+        if (c->t.plain || !mbedtls_ssl_get_bytes_avail(&c->t.ssl)) {
+            struct pollfd pf = {.fd = c->t.net.fd, .events = POLLIN};
             const int r = poll(&pf, 1, 100);
             if (r < 0) return -1;
-            if (r == 0) continue;
+            if (r == 0) {
+                if (c->idle) c->idle();
+                continue;
+            }
         }
-        os_lock(&io);
-        const int r = mbedtls_ssl_read(&ws.ssl, p, n);
-        os_unlock(&io);
+        os_lock(&c->io);
+        const int r = c->t.plain ? mbedtls_net_recv(&c->t.net, p, n) : mbedtls_ssl_read(&c->t.ssl, p, n);
+        os_unlock(&c->io);
         if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
         if (r <= 0) return -1;
         p += r;
         n -= (size_t)r;
     }
     return 0;
+}
+
+static int conn_write(struct conn *c, const void *buf, size_t len)
+{
+    os_lock(&c->io);
+    const int r = c->open && !c->stop ? tls_write(&c->t, buf, len) : -1;
+    os_unlock(&c->io);
+    return r;
+}
+
+/* At the end of its reader. */
+static void conn_close(struct conn *c)
+{
+    os_lock(&c->io);
+    if (!c->t.plain) mbedtls_ssl_close_notify(&c->t.ssl);
+    tls_free(&c->t);
+    c->open = 0;
+    os_unlock(&c->io);
 }
 
 static int ws_send(int opcode, const void *data, size_t len)
@@ -272,9 +304,7 @@ static int ws_send(int opcode, const void *data, size_t len)
     for (int i = 0; i < 4; i++) mask[i] = (uint8_t)rand();
     h += 4;
     for (size_t i = 0; i < len; i++) f[h + i] = ((const uint8_t *)data)[i] ^ mask[i & 3];
-    os_lock(&io);
-    const int r = ws_open && !ws_stop ? tls_write(&ws, f, h + len) : -1;
-    os_unlock(&io);
+    const int r = conn_write(&ws, f, h + len);
     free(f);
     return r;
 }
@@ -287,13 +317,13 @@ static void reader(void *arg)
     int op = 0;
     for (;;) {
         uint8_t h[2], ext[8];
-        if (ws_read(h, 2)) break;
+        if (conn_read(&ws, h, 2)) break;
         uint64_t n = h[1] & 0x7F;
         if (n == 126) {
-            if (ws_read(ext, 2)) break;
+            if (conn_read(&ws, ext, 2)) break;
             n = (uint64_t)ext[0] << 8 | ext[1];
         } else if (n == 127) {
-            if (ws_read(ext, 8)) break;
+            if (conn_read(&ws, ext, 8)) break;
             n = 0;
             for (int i = 0; i < 8; i++) n = n << 8 | ext[i];
         }
@@ -304,7 +334,7 @@ static void reader(void *arg)
         uint8_t *m = realloc(msg, len + n + 1);
         if (!m) break;
         msg = m;
-        if (ws_read(msg + len, n)) break;
+        if (conn_read(&ws, msg + len, n)) break;
         const int opcode = h[0] & 0x0F;
         if (opcode == 8) break;
         if (opcode == 9) ws_send(10, msg + len, n); /* ping -> pong */
@@ -319,11 +349,7 @@ static void reader(void *arg)
     }
     free(msg);
     handler.closed();
-    os_lock(&io);
-    mbedtls_ssl_close_notify(&ws.ssl);
-    tls_free(&ws);
-    ws_open = 0;
-    os_unlock(&io);
+    conn_close(&ws);
 }
 
 int net_ws_connect(const char *url, const char *const *headers, const struct net_ws_handler *h)
@@ -331,8 +357,8 @@ int net_ws_connect(const char *url, const char *const *headers, const struct net
     char host[128], port[8], path[256], first[768], head[1536], resp[1024];
     if (parse_url(url, host, sizeof host, port, sizeof port, path, sizeof path) != 0) return -1;
     /* The reader of the previous connection may still be closing it. */
-    for (int i = 0; ws_open && i < 100; i++) os_sleep(0.01);
-    if (ws_open) return -1;
+    for (int i = 0; ws.open && i < 100; i++) os_sleep(0.01);
+    if (ws.open) return -1;
     uint8_t key[16];
     unsigned char key64[32];
     size_t key_len = 0;
@@ -343,12 +369,12 @@ int net_ws_connect(const char *url, const char *const *headers, const struct net
              "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n",
              path, host, key64);
     const int n = request(head, sizeof head, first, headers);
-    if (n < 0 || tls_connect(&ws, host, port) != 0) return -1;
+    if (n < 0 || tls_connect(&ws.t, host, port) != 0) return -1;
     /* The reply headers a byte at a time, so nothing after them is taken. */
     size_t got = 0;
-    int ok = tls_write(&ws, head, (size_t)n) == 0;
+    int ok = tls_write(&ws.t, head, (size_t)n) == 0;
     while (ok && got < sizeof resp - 1 && (got < 4 || memcmp(resp + got - 4, "\r\n\r\n", 4))) {
-        const int r = mbedtls_ssl_read(&ws.ssl, (unsigned char *)resp + got, 1);
+        const int r = mbedtls_ssl_read(&ws.t.ssl, (unsigned char *)resp + got, 1);
         if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
         if (r <= 0) ok = 0;
         else got++;
@@ -356,15 +382,15 @@ int net_ws_connect(const char *url, const char *const *headers, const struct net
     resp[got] = 0;
     if (!ok || strncmp(resp, "HTTP/1.1 101", 12)) {
         printf("net: websocket refused: %.120s\n", resp);
-        tls_free(&ws);
+        tls_free(&ws.t);
         return -1;
     }
     handler = *h;
-    ws_stop = 0;
-    ws_open = 1;
+    ws.stop = 0;
+    ws.open = 1;
     if (os_thread(reader, NULL, 0, -1) != 0) {
-        ws_open = 0;
-        tls_free(&ws);
+        ws.open = 0;
+        tls_free(&ws.t);
         return -1;
     }
     return 0;
@@ -382,6 +408,243 @@ int net_ws_send_binary(const uint8_t *data, size_t len)
 
 void net_ws_close(void)
 {
-    ws_stop = 1;
-    for (int i = 0; ws_open && i < 200; i++) os_sleep(0.01);
+    ws.stop = 1;
+    for (int i = 0; ws.open && i < 200; i++) os_sleep(0.01);
+}
+
+/* MQTT's remaining length: 7 bits a byte, low first. */
+static size_t put_len(uint8_t *p, size_t n)
+{
+    size_t i = 0;
+    do {
+        p[i] = (uint8_t)(n & 0x7F);
+        n >>= 7;
+        if (n) p[i] |= 0x80;
+        i++;
+    } while (n);
+    return i;
+}
+
+/* An MQTT string: its length in 2 bytes, then the bytes. */
+static size_t put_str(uint8_t *p, const char *s)
+{
+    const size_t n = strlen(s);
+    p[0] = (uint8_t)(n >> 8);
+    p[1] = (uint8_t)n;
+    memcpy(p + 2, s, n);
+    return n + 2;
+}
+
+/* An MQTT packet: its type byte, the length, the body. */
+static int mqtt_send(uint8_t type, const uint8_t *body, size_t len)
+{
+    uint8_t *f = malloc(len + 5);
+    if (!f) return -1;
+    f[0] = type;
+    const size_t h = 1 + put_len(f + 1, len);
+    memcpy(f + h, body, len);
+    const int r = conn_write(&mq, f, h + len);
+    free(f);
+    mq_sent = os_now();
+    return r;
+}
+
+/* A PINGREQ when nothing was sent for half the keep-alive, so the broker keeps the connection. */
+static void mqtt_idle(void)
+{
+    if (os_now() - mq_sent > mq_keepalive / 2) mqtt_send(0xC0, (const uint8_t *)"", 0);
+}
+
+static void mqtt_reader(void *arg)
+{
+    (void)arg;
+    uint8_t *buf = NULL;
+    for (;;) {
+        uint8_t h, b;
+        size_t n = 0;
+        int ok = !conn_read(&mq, &h, 1);
+        for (int i = 0; ok; i++) {
+            ok = i < 4 && !conn_read(&mq, &b, 1);
+            if (ok) n |= (size_t)(b & 0x7F) << (7 * i);
+            if (!ok || !(b & 0x80)) break;
+        }
+        if (!ok || n > MAX_MESSAGE) break;
+        uint8_t *m = realloc(buf, n + 1);
+        if (!m) break;
+        buf = m;
+        if (conn_read(&mq, buf, n)) break;
+        buf[n] = 0;
+        const int type = h >> 4, qos = (h >> 1) & 3;
+        if (type == 3 && n >= 2) { /* PUBLISH: the topic, the packet id with QoS 1 or 2, the message */
+            size_t at = 2 + ((size_t)buf[0] << 8 | buf[1]);
+            if (qos && at + 2 <= n) {
+                mqtt_send(qos == 1 ? 0x40 : 0x50, buf + at, 2); /* PUBACK, or PUBREC */
+                at += 2;
+            }
+            if (at <= n) mq_handler.message((const char *)buf + at);
+        }
+        if (type == 6 && n >= 2) mqtt_send(0x70, buf, 2); /* PUBREL -> PUBCOMP */
+    }
+    free(buf);
+    mq_handler.closed();
+    conn_close(&mq);
+}
+
+int net_mqtt_connect(const char *host, const char *port, const char *client_id, const char *username,
+                     const char *password, int keepalive_s, const char *subscribe, const struct net_mqtt_handler *h)
+{
+    /* The reader of the previous connection may still be closing it. */
+    for (int i = 0; mq.open && i < 100; i++) os_sleep(0.01);
+    if (mq.open) return -1;
+    mq.t.plain = strcmp(port, "8883") != 0;
+    if (tls_connect(&mq.t, host, port) != 0) return -1;
+    mq.stop = 0;
+    mq.open = 1;
+    mq_keepalive = keepalive_s;
+    /* CONNECT: MQTT 3.1.1, a clean session, with the user name and password. */
+    uint8_t body[1024], ack[4];
+    size_t n = put_str(body, "MQTT");
+    body[n++] = 4;
+    body[n++] = 0x80 | 0x40 | 0x02;
+    body[n++] = (uint8_t)(keepalive_s >> 8);
+    body[n++] = (uint8_t)keepalive_s;
+    n += put_str(body + n, client_id);
+    n += put_str(body + n, username);
+    n += put_str(body + n, password);
+    int ok = mqtt_send(0x10, body, n) == 0;
+    for (size_t got = 0; ok && got < sizeof ack;) {
+        const int r = mq.t.plain ? mbedtls_net_recv_timeout(&mq.t.net, ack + got, sizeof ack - got, TIMEOUT_MS)
+                                 : mbedtls_ssl_read(&mq.t.ssl, ack + got, sizeof ack - got);
+        if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
+        if (r <= 0) ok = 0;
+        else got += (size_t)r;
+    }
+    if (!ok || ack[0] != 0x20 || ack[3] != 0) {
+        printf("net: mqtt %s:%s refused (%d)\n", host, port, ok ? ack[3] : -1);
+        conn_close(&mq);
+        return -1;
+    }
+    if (subscribe[0]) {
+        n = 0;
+        body[n++] = 0;
+        body[n++] = 1; /* packet id */
+        n += put_str(body + n, subscribe);
+        body[n++] = 0; /* QoS 0 */
+        mqtt_send(0x82, body, n);
+    }
+    mq_handler = *h;
+    if (os_thread(mqtt_reader, NULL, 0, -1) != 0) {
+        conn_close(&mq);
+        return -1;
+    }
+    return 0;
+}
+
+int net_mqtt_publish(const char *topic, const char *text)
+{
+    const size_t nt = strlen(topic) + 2, len = strlen(text);
+    uint8_t *body = malloc(nt + len);
+    if (!body) return -1;
+    put_str(body, topic);
+    memcpy(body + nt, text, len);
+    const int r = mqtt_send(0x30, body, nt + len); /* PUBLISH, QoS 0 */
+    free(body);
+    return r;
+}
+
+void net_mqtt_close(void)
+{
+    mqtt_send(0xE0, (const uint8_t *)"", 0); /* DISCONNECT */
+    mq.stop = 1;
+    for (int i = 0; mq.open && i < 200; i++) os_sleep(0.01);
+}
+
+static mbedtls_net_context udp;
+static mbedtls_aes_context aes;
+static uint8_t udp_nonce[16];
+static uint32_t udp_sent, udp_got; /* the last sequence number each way */
+static double udp_since;
+static void (*udp_receive)(const uint8_t *data, size_t len);
+static volatile int udp_open, udp_stop;
+
+/* AES-128-CTR, the packet's header as the counter block: encrypts and decrypts. */
+static void udp_crypt(const uint8_t *header, const uint8_t *in, size_t len, uint8_t *out)
+{
+    uint8_t counter[16], block[16];
+    size_t off = 0;
+    memcpy(counter, header, 16);
+    mbedtls_aes_crypt_ctr(&aes, len, &off, counter, block, in, out);
+}
+
+static void udp_reader(void *arg)
+{
+    (void)arg;
+    uint8_t p[2048], data[2048];
+    while (!udp_stop) {
+        struct pollfd pf = {.fd = udp.fd, .events = POLLIN};
+        if (poll(&pf, 1, 100) <= 0) continue;
+        const int n = mbedtls_net_recv(&udp, p, sizeof p);
+        /* Type 1 (audio), and the payload length the header gives. */
+        if (n < 16 || p[0] != 0x01 || (size_t)n != 16 + ((size_t)p[2] << 8 | p[3])) continue;
+        const uint32_t seq = (uint32_t)p[12] << 24 | (uint32_t)p[13] << 16 | (uint32_t)p[14] << 8 | p[15];
+        if (seq <= udp_got) continue; /* late or repeated */
+        /* Up to 3 lost on the way (UDP is not resent): told as NULL, one each, for the decoder to fill in. */
+        for (uint32_t i = udp_got + 1; udp_got && i < seq && seq - i <= 3; i++) udp_receive(NULL, 0);
+        udp_got = seq;
+        udp_crypt(p, p + 16, (size_t)n - 16, data);
+        udp_receive(data, (size_t)n - 16);
+    }
+    mbedtls_net_free(&udp);
+    udp_open = 0;
+}
+
+int net_udp_open(const char *host, int port, const uint8_t key[16], const uint8_t nonce[16],
+                 void (*receive)(const uint8_t *data, size_t len))
+{
+    for (int i = 0; udp_open && i < 100; i++) os_sleep(0.01);
+    if (udp_open) return -1;
+    char p[8];
+    snprintf(p, sizeof p, "%d", port);
+    mbedtls_net_init(&udp);
+    if (mbedtls_net_connect(&udp, host, p, MBEDTLS_NET_PROTO_UDP) != 0) {
+        printf("net: udp %s:%s failed\n", host, p);
+        return -1;
+    }
+    mbedtls_aes_init(&aes);
+    mbedtls_aes_setkey_enc(&aes, key, 128);
+    memcpy(udp_nonce, nonce, 16);
+    udp_sent = udp_got = 0;
+    udp_since = os_now();
+    udp_receive = receive;
+    udp_stop = 0;
+    udp_open = 1;
+    if (os_thread(udp_reader, NULL, 0, -1) != 0) {
+        udp_open = 0;
+        mbedtls_net_free(&udp);
+        return -1;
+    }
+    return 0;
+}
+
+int net_udp_send(const uint8_t *data, size_t len)
+{
+    uint8_t p[16 + 1500];
+    if (!udp_open || udp_stop || len > 1500) return -1;
+    /* The header: the server's nonce, with the payload length, a timestamp (ms) and the sequence number. */
+    memcpy(p, udp_nonce, 16);
+    p[2] = (uint8_t)(len >> 8);
+    p[3] = (uint8_t)len;
+    const uint32_t ts = (uint32_t)((os_now() - udp_since) * 1000), seq = ++udp_sent;
+    for (int i = 0; i < 4; i++) {
+        p[8 + i] = (uint8_t)(ts >> (24 - 8 * i));
+        p[12 + i] = (uint8_t)(seq >> (24 - 8 * i));
+    }
+    udp_crypt(p, data, len, p + 16);
+    return mbedtls_net_send(&udp, p, 16 + len) == (int)(16 + len) ? 0 : -1;
+}
+
+void net_udp_close(void)
+{
+    udp_stop = 1;
+    for (int i = 0; udp_open && i < 200; i++) os_sleep(0.01);
 }

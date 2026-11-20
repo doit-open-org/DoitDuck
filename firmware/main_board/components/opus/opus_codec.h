@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 int opus_codec_encode(const int16_t *pcm, int samples, uint8_t *out, int size);  /* bytes, or -1 */
-int opus_codec_decode(const uint8_t *data, int len, int16_t *pcm, int samples);  /* samples, or -1 */
+/* samples, or -1; data NULL: a lost packet, samples of it made up from the ones before. */
+int opus_codec_decode(const uint8_t *data, int len, int16_t *pcm, int samples);
 
 #endif
