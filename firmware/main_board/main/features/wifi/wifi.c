@@ -62,7 +62,8 @@ static char ip_before[32];  /* the address when wifi.connect was called */
 static int configure(const cJSON *section)
 {
     (void)section;
-    if (access("/sys/class/net/" IFACE, F_OK) != 0) {
+    /* At boot S51wireless loads the driver in the background, and IFACE comes a few seconds after the program. */
+    if (access("/sys/class/net/" IFACE, F_OK) != 0 && access("/etc/init.d/S51wireless", X_OK) != 0) {
         printf("wifi: no " IFACE "\n");
         return -1;
     }
