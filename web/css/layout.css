@@ -53,9 +53,11 @@ main { padding: .7rem; display: grid; gap: .7rem; max-width: 1200px; margin: 0 a
   .grid2 { grid-template-columns: 1fr 1fr; align-items: start; }
   .split { grid-template-columns: 320px 1fr; align-items: start; }
 }
-/* A phone on its side: the control page becomes the two sticks with the camera between. */
+/* A phone on its side: the control page becomes the gamepad. */
 @media (orientation: landscape) and (max-height: 520px) {
-  body { padding-bottom: 0; }
+  body { padding-bottom: 0; padding-left: 0; }
+  main { padding: .4rem; }
   .nav { display: none; }
-  .landscape-hide { display: none; }
+  .control { display: block; } /* the gamepad alone, without the columns and gaps of the cards hidden */
+  .landscape-hide, .banner { display: none !important; } /* over a card's own display (.hero, .voice) */
 }

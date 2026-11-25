@@ -73,13 +73,25 @@
   /* The legends do not fit beside the D-pad: under it, side by side. */
   .pad { grid-template-areas: "lt . . rt" "lb . . rb" "ls mid mid abxy" ". dpad rs ." "pl pl pr pr"; }
 }
-/* A phone on its side (layout.css): only the two sticks, at the screen's sides. */
+.pad-cam { display: none; }
+/* A phone on its side (layout.css): only the gamepad, filling the screen, its two halves at the sides and the
+   camera between them (control.js moves the video there), the middle keys under it; no room for the legends.
+   The keys smaller, the sticks as big as the screen's height leaves room for. */
 @media (orientation: landscape) and (max-height: 520px) {
-  .pad { position: fixed; inset: 3rem 0 0 0; display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem;
-    background: none; border: 0; pointer-events: none; }
-  .pad > :not(.stick) { display: none; }
-  .pad .stick { width: 140px; pointer-events: auto; }
-  .pad .stick i { width: 56px; height: 56px; margin: -28px; }
+  .pad-card { background: none; border: 0; box-shadow: none; padding: 0; }
+  .pad { height: calc(100vh - 4.8rem); height: calc(100dvh - 4.8rem); grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+    grid-template-rows: auto auto 1fr auto; grid-template-areas: "lt . cam . rt" "lb . cam . rb" "ls . cam . abxy" ". dpad mid rs .";
+    gap: .2rem .6rem; padding: .35rem .8rem; }
+  #pad-l, #pad-r { display: none; }
+  .pad-cam { grid-area: cam; display: flex; align-items: center; justify-content: center; place-self: stretch; min-height: 0; }
+  .pad-cam video { width: auto; height: 100%; max-width: 100%; }
+  .pad-cam button { background: var(--card); } /* the panel is the buttons' own fill */
+  .pad > .pk { width: 40px; height: 22px; }
+  .abxy { grid-template-columns: repeat(3, 22px); grid-template-rows: repeat(3, 22px); gap: 1px 4px; }
+  .abxy .pk, .pad-mid .pk { width: 22px; height: 22px; }
+  .dpad { grid-template-columns: repeat(3, 22px); grid-template-rows: repeat(3, 22px); }
+  .dpad .pk { width: 22px; height: 22px; }
+  .pad .stick { width: clamp(56px, calc((100vh - 170px) / 2), 120px); }
 }
 /* A stick: a dished base with a ring and a cross, a raised yellow knob. */
 .stick { width: 140px; height: 140px; border-radius: 50%; position: relative; touch-action: none; border: 1px solid var(--line);

@@ -9,6 +9,8 @@ import {joystick} from '../components/joystick.js';
 import {attitudeHtml, showAttitude} from '../components/attitude.js';
 
 let el, unsub, timer, resets = [], cam = null;
+// A phone on its side (as in layout.css): the camera between the gamepad's two halves, a button there while it is off.
+const sideways = window.matchMedia('(orientation: landscape) and (max-height: 520px)');
 const sticks = {l: [0, 0], r: [0, 0]}, keys = new Set();
 let moving = false, busy = false, lastHead = '0,0,0,0';
 let log = [], seen = {};
@@ -69,14 +71,14 @@ function html() {
     <h3 data-i18n="control.skills"></h3>
     <div class="skills">${skills || `<a href="#actions" data-i18n="control.no_skills"></a>`}</div>
   </section>
-  <section class="card">
+  <section class="card pad-card">
     <h2 class="landscape-hide" data-i18n="control.sticks"></h2>
     <div class="pad">${key('lt')}${key('lb')}${key('rt')}${key('rb')}
       <div class="pad-mid"><div>${key('select')}<i class="pk off">⌂</i>${key('start')}</div>
         <div><i class="pk off"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4"/></svg></i><i class="pk off">T</i></div></div>
       <div id="stick-l"></div><div class="abxy">${key('y')}${key('x')}${key('b')}${key('a')}</div>
       <div class="dpad">${key('up')}${key('left')}${key('right')}${key('down')}</div><div id="stick-r"></div>
-      <ul id="pad-l" class="pad-legend"></ul><ul id="pad-r" class="pad-legend"></ul></div>
+      <ul id="pad-l" class="pad-legend"></ul><ul id="pad-r" class="pad-legend"></ul><div class="pad-cam"><button id="pad-cam-btn" data-i18n="control.camera_on"></button></div></div>
     <p class="muted landscape-hide" data-i18n="control.pad_hint"></p>
     <p class="muted landscape-hide keys-hint" data-i18n="control.keys"></p>
   </section></div>`;
@@ -156,6 +158,7 @@ function toggleCamera() {
     cam = null;
     $('#cam').hidden = true;
     $('#cam-btn').textContent = t('control.camera_on');
+    $('#pad-cam-btn').hidden = false;
     return;
   }
   if (!window.JMuxer) {
@@ -182,6 +185,18 @@ function toggleCamera() {
   cam = {ws, mux};
   v.hidden = false;
   $('#cam-btn').textContent = t('control.camera_off');
+  $('#pad-cam-btn').hidden = true;
+}
+
+// The camera's picture in the gamepad when sideways, in its card otherwise; a moved video pauses, so it plays again.
+function placeCamera() {
+  const v = $('#cam');
+  if (sideways.matches) {
+    $('.pad-cam').append(v);
+  } else {
+    $('#cam-btn').closest('section').append(v);
+  }
+  v.play().catch(() => {});
 }
 
 // The voice bar's log: a new line whenever what was heard, said or done changes.
@@ -245,7 +260,7 @@ function render(s) {
 
 export function mount(root) {
   el = document.createElement('div');
-  el.className = 'grid2';
+  el.className = 'grid2 control';
   el.innerHTML = html();
   root.append(el);
   apply(el);
@@ -258,7 +273,7 @@ export function mount(root) {
     k.onpointerdown = e => { if (k.classList.contains('off')) return; k.setPointerCapture(e.pointerId); k.classList.add('down'); press(k.dataset.key, true); };
     k.onpointerup = k.onpointercancel = () => { if (k.classList.contains('down')) { k.classList.remove('down'); press(k.dataset.key, false); } };
   });
-  $('#cam-btn').onclick = toggleCamera;
+  $('#cam-btn').onclick = $('#pad-cam-btn').onclick = toggleCamera;
   if ($('#gesture')) $('#gesture').onchange = e => act(rpc('gesture.control', {on: e.target.checked}));
   el.querySelectorAll('[data-mode]').forEach(b => b.onclick = () =>
     act(b.dataset.mode === 'off' ? rpc('robot.estop') : rpc('robot.set_mode', {mode: b.dataset.mode})));
@@ -285,6 +300,8 @@ export function mount(root) {
   window.addEventListener('keydown', keydown);
   window.addEventListener('keyup', keyup);
   window.addEventListener('blur', stop);
+  sideways.addEventListener('change', placeCamera);
+  if (sideways.matches) placeCamera();
 }
 
 function keydown(e) {
@@ -307,4 +324,5 @@ export function unmount() {
   window.removeEventListener('keydown', keydown);
   window.removeEventListener('keyup', keyup);
   window.removeEventListener('blur', stop);
+  sideways.removeEventListener('change', placeCamera);
 }
