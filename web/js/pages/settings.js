@@ -84,6 +84,7 @@ async function sounds() {
 
 // Wi-Fi: the network in use and its address, or how far connecting has got; and the hotspot, when it is open.
 let wifiAp = false, wifiAlways = false;
+let pairedName = ''; // pad.status: the paired gamepad, named when removing it
 async function wifiState() {
   const w = await rpc('wifi.status');
   const on = w.state === 'COMPLETED';
@@ -147,8 +148,15 @@ async function refresh() {
     }
     if (has('gamepad')) {
       const p = await rpc('pad.status');
-      $('#pad').innerHTML = kv([['settings.pad_state', t(p.connected ? 'settings.yes' : 'settings.no')]].concat(
+      $('#pad').innerHTML = kv([['settings.pad_state', t(p.connected ? 'settings.yes' : 'settings.no')],
+        ['settings.pad_paired', p.paired || '—']].concat(p.pair ? [['settings.pad_pair_state', t(`pad.${p.pair}`)]] : [],
         Object.entries(p.buttons).map(([k, v]) => [k.toUpperCase(), v])));
+      pairedName = p.paired;
+      // An image without uhid or BlueZ's HoG plugin pairs a pad that never works: say so, and do not pair.
+      $('#pad-missing').hidden = !p.missing;
+      $('#pad-missing').textContent = p.missing ? t('pad.' + p.missing) : '';
+      $('#pad-pair').disabled = p.pair === 'pairing' || !!p.missing;
+      $('#pad-unpair').disabled = p.pair === 'pairing' || !p.paired;
     }
   } catch (e) { /* shown again next time */ }
 }
@@ -183,7 +191,8 @@ export function mount(root) {
     <table><tbody id="commands"></tbody></table><p class="muted" data-i18n="settings.in_config"></p></details></section>` : ''}
   ${has('xiaozhi') ? `<section class="card"><h2 data-i18n="settings.xiaozhi"></h2><div id="xz"></div><p class="muted" data-i18n="settings.xz_help"></p></section>` : ''}
   ${has('gesture') ? `<section class="card"><h2 data-i18n="settings.gesture"></h2><table><tbody id="gestures"></tbody></table><p class="muted" data-i18n="settings.in_config"></p></section>` : ''}
-  ${has('gamepad') ? `<section class="card"><h2 data-i18n="settings.gamepad"></h2><div id="pad"></div></section>` : ''}
+  ${has('gamepad') ? `<section class="card"><h2 data-i18n="settings.gamepad"></h2><p id="pad-missing" class="chip warn" hidden></p><div id="pad"></div>
+    <div class="row"><button id="pad-pair" data-i18n="settings.pad_pair"></button><button id="pad-unpair" data-i18n="settings.pad_unpair"></button></div><p class="muted" data-i18n="settings.pad_help"></p></section>` : ''}
   <section class="card"><h2 data-i18n="settings.about"></h2>
     ${kv([['settings.version', info.version], ['settings.board', info.board], ['settings.robot', info.name], ['settings.features', info.features.join(', ')]])}
     <p data-i18n="settings.licenses"></p></section>
@@ -213,6 +222,12 @@ export function mount(root) {
     };
     $('#wifi-ap').onclick = () => act(rpc('wifi.ap', {on: !wifiAp}).then(wifiState));
     $('#wifi-always').onchange = e => act(rpc('wifi.ap', {always: e.target.checked}).then(wifiState));
+  }
+  if (has('gamepad')) {
+    $('#pad-pair').onclick = () => act(rpc('pad.pair').then(refresh));
+    $('#pad-unpair').onclick = () => {
+      if (window.confirm(t('settings.pad_unpair_confirm', {name: pairedName}))) act(rpc('pad.unpair').then(refresh));
+    };
   }
   $('#reset').onclick = () => {
     if (window.confirm(t('settings.reset_confirm'))) act(rpc('system.factory_reset').then(() => { $('#reset').disabled = true; window.alert(t('settings.reset_done')); }));

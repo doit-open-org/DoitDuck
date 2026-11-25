@@ -69,6 +69,8 @@ static const struct {
     {"wifi_ssid", "a network name is 1 to 32 bytes"},
     {"wifi_password", "a password is 8 to 63 plain characters, or none for an open network"},
     {"wifi_write", "could not save the network or start Wi-Fi"},
+    {"pad_pairing", "a gamepad is being paired; wait for it to finish"},
+    {"pad_unpair", "could not forget the paired gamepad"},
     {"unknown_method", "unknown method"},
     {"wake_first", "say the wake word first"},
     {"unknown_words", "no command for these words"},

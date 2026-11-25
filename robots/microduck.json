@@ -87,14 +87,15 @@
   },
   "gamepad": {
     "buttons": {
-      "a": "walk_toggle",
-      "b": "skill:pick",
+      "ls": "walk",
+      "lt+ls": "walk_side",
+      "rs": "look",
+      "lt+rs": "neck_tilt",
       "x": "skill:roulade",
-      "y": "mouth_hold",
+      "y": "skill:pick",
+      "select": "estop",
       "start": "start_cycle",
-      "select": "estop_hold",
-      "up": "head_mode",
-      "left": "move_mode"
+      "rt": "mouth_hold"
     }
   },
   "voice": {

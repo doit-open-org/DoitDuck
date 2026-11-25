@@ -16,7 +16,71 @@
 .quacks { display: flex; gap: .35rem; overflow-x: auto; padding-bottom: .2rem; }
 .quacks button { flex: none; min-height: 38px; border-radius: 999px; padding: 0 .9rem; }
 
-.sticks { display: flex; gap: 1rem; justify-content: space-around; padding: .4rem 0 3rem; }
+/* The sticks card: the gamepad's keys where they are on the pad, on four equal columns: the triggers over the
+   bumpers over the left stick and X Y A B, the middle keys between those; the D-pad and the right stick on the two
+   middle columns, a row lower, with what the left-hand and right-hand keys do in the corners beside them. */
+.pad { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-areas: "lt . . rt" "lb . . rb" "ls mid mid abxy" "pl dpad rs pr";
+  place-items: center; gap: .5rem 0; padding: .8rem; border-radius: 16px; background: var(--fill); border: 1px solid var(--line); }
+.pad > [data-key=lt] { grid-area: lt; }
+.pad > [data-key=lb] { grid-area: lb; }
+.pad > [data-key=rt] { grid-area: rt; }
+.pad > [data-key=rb] { grid-area: rb; }
+/* The middle keys: ⧉ ⌂ ≡, and O and T under the gaps between them. */
+.pad-mid { grid-area: mid; display: grid; gap: .3rem; justify-items: center; }
+.pad-mid > div { display: flex; gap: .4rem; }
+#stick-l { grid-area: ls; }
+.abxy { grid-area: abxy; }
+.dpad { grid-area: dpad; }
+#stick-r { grid-area: rs; }
+#pad-l { grid-area: pl; justify-self: start; }
+#pad-r { grid-area: pr; justify-self: end; }
+/* A key: a round dark button; grey and dashed when it does nothing, red for the emergency stop. */
+.pk { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: #2e2e2b; color: #ecebe6;
+  font: 700 .78rem/1 system-ui, sans-serif; font-style: normal; box-shadow: 0 2px 4px rgb(0 0 0 / .25); }
+.pk svg { width: .75rem; height: .75rem; fill: none; stroke: currentColor; stroke-width: 1.3; }
+.pk.off { background: transparent; color: var(--muted); border: 1px dashed var(--muted); box-shadow: none; }
+.pk.stop { background: var(--bad); color: #fff; }
+.pad .pk[data-key]:not(.off) { cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; transition: transform .08s; }
+.pad .pk.down { transform: scale(.88); filter: brightness(1.4); }
+.pad > .pk { width: 48px; height: 24px; border-radius: 8px; }
+.pad-mid .pk { width: 28px; height: 28px; }
+.dpad .pk { width: 28px; height: 28px; border-radius: 6px; font-size: .62rem; }
+/* X Y A B and the D-pad as diamonds: up, left, right, down. */
+.abxy, .dpad { display: grid; grid-template-areas: ". u ." "l . r" ". d ."; place-items: center; }
+.abxy { grid-template-columns: repeat(3, 32px); grid-template-rows: repeat(3, 32px); gap: 2px 6px; }
+.dpad { grid-template-columns: repeat(3, 28px); grid-template-rows: repeat(3, 28px); gap: 2px; }
+:is(.abxy, .dpad) > :nth-child(1) { grid-area: u; }
+:is(.abxy, .dpad) > :nth-child(2) { grid-area: l; }
+:is(.abxy, .dpad) > :nth-child(3) { grid-area: r; }
+:is(.abxy, .dpad) > :nth-child(4) { grid-area: d; }
+.pad .stick { width: min(104px, 20vw); height: auto; aspect-ratio: 1; background-color: var(--card); }
+.pad .stick i { width: 42%; height: 42%; margin: -21%; }
+/* The legends, light beside the keys: a key, what it does; the right one mirrored. */
+.pad-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: .2rem; max-width: 100%; font-size: .7rem; line-height: 1.25; color: var(--muted); }
+.pad-legend li { display: flex; gap: .35rem; align-items: center; }
+#pad-r li { flex-direction: row-reverse; text-align: right; }
+.pad-legend .pk { width: auto; min-width: 1.35rem; height: 1.35rem; padding: 0 .25rem; border-radius: 999px; font-size: .6rem; box-shadow: none;
+  background: var(--card); color: var(--muted); border: 1px solid var(--line); }
+.pad-legend span { white-space: pre; }
+/* A phone: smaller keys, so X Y A B and the D-pad fit their columns. */
+@media (max-width: 480px) {
+  .abxy { grid-template-columns: repeat(3, 28px); grid-template-rows: repeat(3, 28px); gap: 2px 4px; }
+  .abxy .pk { width: 28px; height: 28px; }
+  .dpad { grid-template-columns: repeat(3, 22px); grid-template-rows: repeat(3, 22px); }
+  .dpad .pk { width: 22px; height: 22px; }
+  .pad > .pk { width: 40px; }
+  /* The legends do not fit beside the D-pad: under it, side by side. */
+  .pad { grid-template-areas: "lt . . rt" "lb . . rb" "ls mid mid abxy" ". dpad rs ." "pl pl pr pr"; }
+}
+/* A phone on its side (layout.css): only the two sticks, at the screen's sides. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .pad { position: fixed; inset: 3rem 0 0 0; display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem;
+    background: none; border: 0; pointer-events: none; }
+  .pad > :not(.stick) { display: none; }
+  .pad .stick { width: 140px; pointer-events: auto; }
+  .pad .stick i { width: 56px; height: 56px; margin: -28px; }
+}
 /* A stick: a dished base with a ring and a cross, a raised yellow knob. */
 .stick { width: 140px; height: 140px; border-radius: 50%; position: relative; touch-action: none; border: 1px solid var(--line);
   background: linear-gradient(var(--line), var(--line)) center / 1px 70% no-repeat, linear-gradient(var(--line), var(--line)) center / 70% 1px no-repeat,
@@ -24,8 +88,6 @@
   box-shadow: inset 0 3px 10px rgb(0 0 0 / .1); }
 .stick i { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #ffe27a, var(--accent) 55%, #d39a00); box-shadow: 0 4px 10px rgb(0 0 0 / .28); }
-.stick small { position: absolute; left: -1rem; right: -1rem; bottom: -1.5rem; text-align: center; }
-.stick b { position: absolute; left: -1rem; right: -1rem; bottom: -2.8rem; text-align: center; font-size: .82rem; }
 video { width: 100%; border-radius: 10px; background: #000; display: block; }
 .skills { display: flex; gap: .4rem; flex-wrap: wrap; }
 /* Segmented: one of a few, chosen. */

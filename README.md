@@ -68,6 +68,7 @@ scp -r models root@<IP>:/root/doitduck/
 - 开机连 Wi-Fi：把 [tools/board/S52wifi](tools/board/S52wifi) 放到 `/etc/init.d/`。
 - 热点配网需要 `BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT`。
 - 蓝牙配网需要 BlueZ 和 GLib（`BR2_PACKAGE_AIC8800D_SDIO_BLE`）。程序链接 GLib，镜像没有时在 Kconfig 关闭 `DOITDUCK_BLUFI`。
+- 蓝牙手柄需要内核 `CONFIG_UHID` 和 BlueZ 的 HoG 插件（`BR2_PACKAGE_BLUEZ5_UTILS_PLUGINS_HOG`）。
 - 标定、导入的动作等数据在 `/root/doitduck/data/`，重新部署不会覆盖。
 
 在线升级：网页「设置 → 升级」上传升级包，保留 `data/`。
@@ -162,6 +163,14 @@ python3 tools/import_policy.py policy.onnx manifest.json --host <IP>   # 导入�
 
 已联网时，热点 5 分钟无操作自动关闭。勾选「热点常开」后热点常开，开机也会打开，可在没有路由器时使用。
 
+### 手柄
+
+支持 BLE 蓝牙手柄，在「设置 → 手柄」配对。ShanWan Q34B 拨到 D 档：关机时按 Pair 开机并进入配对，开机时按 Pair 关机，关机时按 Home 开机并回连。
+
+- 左摇杆走路（前后、转向），右摇杆控制头部（抬头、转头）；按住 LT 时分别改为平移和伸缩脖子、歪头。
+- START 走路 / 站立，⧉ 急停，RT 按住张嘴，X / Y 技能。
+- 按键在 `gamepad.buttons` 中配置，`"lt+x"` 表示按住 LT 再按 X；摇杆动作有 `walk`、`walk_side`、`look`、`neck_tilt`。
+
 ### 手势、ToF 和叫声
 
 - 手势：点赞点头、张开手掌张嘴、握拳闭嘴，在 `gesture` 中配置。
@@ -176,7 +185,7 @@ python3 tools/import_policy.py policy.onnx manifest.json --host <IP>   # 导入�
 | --- | --- | --- |
 | `DOITDUCK_WEB` / `VOICE` / `GESTURE` / `WIFI` / `TOF` / `BLUFI` | 开 | 功能开关 |
 | `DOITDUCK_XIAOZHI` | 开 | 小智，需要 mipk 唤醒和网络 |
-| `DOITDUCK_GAMEPAD` | 关 | 手柄，尚未实现读取 |
+| `DOITDUCK_GAMEPAD` | 开 | BLE 蓝牙手柄 |
 | `DOITDUCK_ROBOT` | `microduck` | 机身配置 |
 | `DOITDUCK_HTTP_PORT` | 80 | 网页端口 |
 | `DOITDUCK_BUS_DEVICE` | `/dev/ttyAMA1` | 舵机总线串口 |

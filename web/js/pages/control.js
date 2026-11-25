@@ -1,5 +1,5 @@
 // Control: an overview (attitude, what the duck is doing, the loops and battery), the camera, the voice bar (voice, xiaozhi and gestures as one log of what was heard
-// and done, quack buttons), modes, skills, the two sticks and the mouth. Motion is sent only
+// and done, quack buttons), modes, skills, and a gamepad (sticks and keys). Motion is sent only
 // while a stick or key is held, so an idle page holds no control.
 import {rpc} from '../rpc.js';
 import {store, subscribe, has} from '../store.js';
@@ -10,11 +10,33 @@ import {attitudeHtml, showAttitude} from '../components/attitude.js';
 
 let el, unsub, timer, resets = [], cam = null;
 const sticks = {l: [0, 0], r: [0, 0]}, keys = new Set();
-let headMode = false, moving = false, busy = false, lastHead = '';
+let moving = false, busy = false, lastHead = '0,0,0,0';
 let log = [], seen = {};
 
 const $ = s => el.querySelector(s);
 const dz = v => Math.abs(v) < 0.1 ? 0 : v;
+
+// The sticks card: the gamepad's keys where they are on a ShanWan Q34B (Xbox layout), and in its bottom corners
+// what they do, from robots/<name>.json "gamepad" (pad.status): the left stick and the left-hand and middle keys on
+// the left, the right stick and the right-hand keys on the right, each key's combinations after it. Keys doing
+// nothing are grey, the emergency stop red. ⌂, O and T are drawn only: the pad keeps them to itself. ls and rs are
+// the sticks.
+const GLYPH = {lt: 'LT', lb: 'LB', rt: 'RT', rb: 'RB', up: '▲', down: '▼', left: '◀', right: '▶',
+  select: '<svg viewBox="0 0 12 12"><rect x="1" y="1" width="7" height="7" rx="1.5"/><rect x="4" y="4" width="7" height="7" rx="1.5"/></svg>',
+  start: '≡', x: 'X', y: 'Y', a: 'A', b: 'B', ls: 'L', rs: 'R'};
+const PAD_L = ['lt', 'lb', 'ls', 'start', 'up', 'down', 'left', 'right', 'select'], PAD_R = ['rt', 'rb', 'y', 'x', 'b', 'a', 'rs'];
+let padButtons = {};                         /* pad.status: "x" and "lt+x" bindings (features/gamepad) */
+const heldKeys = new Set(), held = {};      /* the page's keys held down; the action each key's press started */
+// The buttons some binding holds first: held only, running nothing of their own.
+const mods = () => new Set(Object.keys(padButtons).filter(n => n.includes('+')).map(n => n.split('+')[0]));
+// Key id's own action; the sticks walk and look by default.
+const plain = id => padButtons[id] || {ls: 'walk', rs: 'look'}[id];
+// Key id's action with the page's keys held: a binding with one of them held first, else its own.
+function bound(id) {
+  for (const m of heldKeys) if (padButtons[`${m}+${id}`]) return padButtons[`${m}+${id}`];
+  return plain(id);
+}
+const key = id => `<i class="pk" data-key="${id}">${GLYPH[id]}</i>`;
 
 function html() {
   const info = store.info, voice = has('voice') || has('xiaozhi');
@@ -48,54 +70,83 @@ function html() {
     <div class="skills">${skills || `<a href="#actions" data-i18n="control.no_skills"></a>`}</div>
   </section>
   <section class="card">
-    <div class="row landscape-hide"><span class="grow" data-i18n="control.sticks"></span>
-      <button id="stick-mode"></button></div>
-    <div class="sticks"><div id="stick-l"><small id="stick-l-label"></small><b id="stick-l-v" class="num">0.00 / 0.00</b></div>
-      <div id="stick-r"><small id="stick-r-label"></small><b id="stick-r-v" class="num">0.00</b></div></div>
-    <label class="landscape-hide"><span data-i18n="control.mouth"></span> <b id="mouth-v" class="num">0°</b>
-      <input id="mouth" type="range" min="0" max="${info.mouth_max}" step="1" value="0"></label>
-    <div class="landscape-hide"><div class="row"><span class="grow" data-i18n="control.head"></span>
-      <button id="head-center" data-i18n="control.head_center"></button></div>
-      ${['neck', 'pitch', 'yaw', 'roll'].map((k, i) => `<label><span data-i18n="control.head_${k}"></span> <b id="head-v${i}" class="num">0.00</b>
-      <input data-head="${i}" type="range" min="-1" max="1" step="0.05" value="0"></label>`).join('')}</div>
+    <h2 class="landscape-hide" data-i18n="control.sticks"></h2>
+    <div class="pad">${key('lt')}${key('lb')}${key('rt')}${key('rb')}
+      <div class="pad-mid"><div>${key('select')}<i class="pk off">⌂</i>${key('start')}</div>
+        <div><i class="pk off"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4"/></svg></i><i class="pk off">T</i></div></div>
+      <div id="stick-l"></div><div class="abxy">${key('y')}${key('x')}${key('b')}${key('a')}</div>
+      <div class="dpad">${key('up')}${key('left')}${key('right')}${key('down')}</div><div id="stick-r"></div>
+      <ul id="pad-l" class="pad-legend"></ul><ul id="pad-r" class="pad-legend"></ul></div>
+    <p class="muted landscape-hide" data-i18n="control.pad_hint"></p>
     <p class="muted landscape-hide keys-hint" data-i18n="control.keys"></p>
   </section></div>`;
 }
 
-function stickLabels() {
-  $('#stick-mode').textContent = t(headMode ? 'control.mode_head' : 'control.mode_walk');
-  $('#stick-l-label').textContent = t(headMode ? 'control.stick_head_l' : 'control.stick_walk_l');
-  $('#stick-r-label').textContent = t(headMode ? 'control.stick_head_r' : 'control.stick_walk_r');
+// What each key does, alone and with another held first.
+function padKeys() {
+  const fn = a => {
+    if (!a.startsWith('skill:')) return tr(`pad.fn_${a}`, a);
+    const s = store.info.skills.find(k => k.name === a.slice(6));
+    return s ? L(s.label) : a.slice(6);
+  };
+  const m = mods();
+  const combos = id => Object.entries(padButtons).filter(([n]) => n.split('+')[1] === id);
+  const li = (badge, s) => `<li><i class="pk">${badge}</i><span>${esc(s)}</span></li>`;
+  const legend = ids => ids.map(id => (m.has(id) ? li(GLYPH[id], t('pad.mod')) : plain(id) ? li(GLYPH[id], fn(plain(id))) : '')
+    + combos(id).map(([n, a]) => li(`${GLYPH[n.split('+')[0]]}+${GLYPH[id]}`, fn(a))).join('')).join('');
+  $('#pad-l').innerHTML = legend(PAD_L);
+  $('#pad-r').innerHTML = legend(PAD_R);
+  el.querySelectorAll('.pad [data-key]').forEach(k => {
+    const id = k.dataset.key;
+    k.classList.toggle('off', !m.has(id) && !plain(id) && !combos(id).length);
+    k.classList.toggle('stop', padButtons[k.dataset.key] === 'estop');
+  });
 }
 
-// Every 50 ms: the body's twist while something is held, or the head while in head mode.
+// A key of the page's gamepad went down or up: what the gamepad's would do (features/gamepad), from the page.
+// A key some binding holds first is only held; a key let go ends what its press started.
+function press(id, down) {
+  if (mods().has(id)) { if (down) heldKeys.add(id); else heldKeys.delete(id); return; }
+  const a = down ? bound(id) : held[id];
+  held[id] = down ? a : undefined;
+  if (a === 'mouth_hold') act(rpc('robot.mouth', {deg: down ? store.info.mouth_max : 0}));
+  else if (!down || !a) return;
+  else if (a === 'estop') act(rpc('robot.estop'));
+  else if (a === 'start_cycle') act(rpc('robot.set_mode', {mode: store.status && store.status.mode === 'hold' ? 'walk' : 'hold'}));
+  else if (a.startsWith('skill:')) act(rpc('robot.skill', {name: a.slice(6)}));
+}
+
+// Every 50 ms, as the gamepad: each stick does its action (walk, walk_side, look, neck_tilt) and the W A S D Q E
+// keys walk; the body's twist while something is held, the head when it changes.
 function send() {
   if (document.hidden || busy) return;
-  const vmax = store.info.vmax;
-  if (headMode) {
-    const head = [-sticks.r[1], -sticks.l[1], -sticks.l[0], sticks.r[0]].map(v => +dz(v).toFixed(2));
-    const key = head.join();
-    if (key === lastHead) return;
-    lastHead = key;
-    busy = true;
-    rpc('robot.head', {head}).catch(toast).finally(() => busy = false);
-    return;
-  }
-  const k = (a, b) => keys.has(a) - keys.has(b);
-  const tw = [
-    keys.has('w') || keys.has('s') ? k('w', 's') * 0.5 * vmax[0] : dz(sticks.l[1]) * vmax[0],
-    keys.has('a') || keys.has('d') ? k('a', 'd') * 0.5 * vmax[1] : -dz(sticks.l[0]) * vmax[1],
-    keys.has('q') || keys.has('e') ? k('q', 'e') * 0.5 * vmax[2] : -dz(sticks.r[0]) * vmax[2]];
-  const active = tw.some(v => v !== 0);
-  if (!active && !moving) return;
+  const tw = [0, 0, 0], h = [0, 0, 0, 0];
+  [['ls', sticks.l], ['rs', sticks.r]].forEach(([id, [sx, sy]]) => {
+    const x = dz(sx), y = dz(sy), a = bound(id);
+    if (a === 'walk') { tw[0] += y; tw[2] -= x; }
+    else if (a === 'walk_side') { tw[0] += y; tw[1] -= x; }
+    else if (a === 'look') { h[1] -= y; h[2] -= x; }
+    else if (a === 'neck_tilt') { h[0] -= y; h[3] += x; }
+  });
+  [['w', 's'], ['a', 'd'], ['q', 'e']].forEach(([a, b], i) => {
+    if (keys.has(a) || keys.has(b)) tw[i] = (keys.has(a) - keys.has(b)) * 0.5;
+  });
+  tw.forEach((v, i) => tw[i] = v * store.info.vmax[i]);
+  const head = h.map(v => +v.toFixed(2));
+  const active = tw.some(v => v !== 0), calls = [];
+  if (active || moving) calls.push(rpc('robot.move', {vx: tw[0], vy: tw[1], wz: tw[2]}).catch(e => { toast(e); stop(); }));
   moving = active;
+  if (head.join() !== lastHead) calls.push(rpc('robot.head', {head}).catch(toast));
+  lastHead = head.join();
+  if (!calls.length) return;
   busy = true;
-  rpc('robot.move', {vx: tw[0], vy: tw[1], wz: tw[2]}).catch(e => { toast(e); stop(); }).finally(() => busy = false);
+  Promise.all(calls).finally(() => busy = false);
 }
 
 function stop() {
   keys.clear();
   resets.forEach(r => r());
+  el.querySelectorAll('.pad .pk.down').forEach(k => { k.classList.remove('down'); press(k.dataset.key, false); });
 }
 
 function toggleCamera() {
@@ -178,11 +229,6 @@ function render(s) {
   $('#c-imu').classList.toggle('bad', !s.imu_ok);
   $('#c-batt').textContent = s.battery_v ? s.battery_v.toFixed(2) + ' V' : '—';
   $('#c-batt').classList.toggle('bad', s.battery_v > 0 && s.battery_v < 6.8);
-  // The head sliders show where the head is (the stick and gestures move it too), except the one being dragged.
-  el.querySelectorAll('[data-head]').forEach((r, i) => {
-    if (s.head && !r.matches(':active')) r.value = s.head[i];
-    $('#head-v' + i).textContent = (+r.value).toFixed(2);
-  });
   if ($('#gesture')) $('#gesture').checked = !!(s.gesture && s.gesture.control);
   if (!$('#v-state')) return;
   const v = s.voice || {}, x = s.xiaozhi || {};
@@ -203,10 +249,15 @@ export function mount(root) {
   el.innerHTML = html();
   root.append(el);
   apply(el);
-  stickLabels();
-  resets = [joystick($('#stick-l'), (x, y) => { sticks.l = [x, y]; $('#stick-l-v').textContent = `${y.toFixed(2)} / ${x.toFixed(2)}`; }),
-    joystick($('#stick-r'), (x, y) => { sticks.r = [x, y]; $('#stick-r-v').textContent = (headMode ? y : x).toFixed(2); })];
-  $('#stick-mode').onclick = () => { stop(); headMode = !headMode; lastHead = ''; stickLabels(); };
+  padKeys();
+  if (has('gamepad')) rpc('pad.status').then(p => { padButtons = p.buttons; padKeys(); }).catch(() => {});
+  resets = [joystick($('#stick-l'), (x, y) => { sticks.l = [x, y]; }), joystick($('#stick-r'), (x, y) => { sticks.r = [x, y]; })];
+  // The keys press while held, so a key can be held with one finger and a stick or key pressed with another.
+  el.querySelectorAll('.pad [data-key]').forEach(k => {
+    if (k.closest('.pad-legend')) return;
+    k.onpointerdown = e => { if (k.classList.contains('off')) return; k.setPointerCapture(e.pointerId); k.classList.add('down'); press(k.dataset.key, true); };
+    k.onpointerup = k.onpointercancel = () => { if (k.classList.contains('down')) { k.classList.remove('down'); press(k.dataset.key, false); } };
+  });
   $('#cam-btn').onclick = toggleCamera;
   if ($('#gesture')) $('#gesture').onchange = e => act(rpc('gesture.control', {on: e.target.checked}));
   el.querySelectorAll('[data-mode]').forEach(b => b.onclick = () =>
@@ -215,16 +266,6 @@ export function mount(root) {
     const b = e.target.closest('[data-skill]');
     if (b) act(rpc('robot.skill', {name: b.dataset.skill}));
   };
-  $('#mouth').oninput = e => {
-    $('#mouth-v').textContent = e.target.value + '°';
-    act(rpc('robot.mouth', {deg: +e.target.value}));
-  };
-  const sliders = [...el.querySelectorAll('[data-head]')];
-  sliders.forEach((r, i) => r.oninput = () => {
-    $('#head-v' + i).textContent = (+r.value).toFixed(2);
-    act(rpc('robot.head', {head: sliders.map(s => +s.value)}));
-  });
-  $('#head-center').onclick = () => act(rpc('robot.head', {head: [0, 0, 0, 0]}));
   if ($('#v-wake')) {
     $('#v-wake').onclick = () => act(rpc('voice.wake'));
     if ($('#v-stop')) $('#v-stop').onclick = () => act(rpc('voice.wake'));

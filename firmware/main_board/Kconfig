@@ -8,8 +8,8 @@ config DOITDUCK_WEB
     default y
 
 config DOITDUCK_GAMEPAD
-    bool "Gamepad (needs a pad reader; none yet)"
-    default n
+    bool "Gamepad: a BLE gamepad (paired from the web page), read from /dev/input"
+    default y
 
 config DOITDUCK_VOICE
     bool "Voice: wake word and command words"

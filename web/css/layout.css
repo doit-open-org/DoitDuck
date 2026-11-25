@@ -58,6 +58,4 @@ main { padding: .7rem; display: grid; gap: .7rem; max-width: 1200px; margin: 0 a
   body { padding-bottom: 0; }
   .nav { display: none; }
   .landscape-hide { display: none; }
-  .sticks { position: fixed; inset: 3rem 0 0 0; justify-content: space-between; padding: 1rem 2rem; pointer-events: none; }
-  .sticks > * { pointer-events: auto; }
 }

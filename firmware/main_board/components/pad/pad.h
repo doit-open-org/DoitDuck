@@ -2,8 +2,10 @@
 #define PAD_H
 
 /*
- * A gamepad. Implementations: none.c (Bluetooth through BlueZ is reserved).
+ * A BLE gamepad, paired through BlueZ (the image's ble-service starts
+ * bluetoothd) and read from the Linux input devices (evdev.c).
  */
+#include <stddef.h>
 #include <stdint.h>
 
 enum {
@@ -18,7 +20,25 @@ struct pad_state {
     uint32_t buttons;       /* PAD_* */
 };
 
-/* Waits up to 20 ms for the pad; 1 with a pad connected (s filled), 0 with none, -1 with no gamepad support. */
+/* Waits up to 20 ms for the pad; 1 with a pad connected (s filled), 0 with none. */
 int pad_read(struct pad_state *s);
+
+/*
+ * Pairs a BLE gamepad in pairing mode, in place of the one paired before; takes up to a
+ * minute. 0 with one paired (its name in name), -1 with none found.
+ */
+int pad_pair(char *name, size_t size);
+
+/* The paired gamepad: 0 with one paired (its address and name in name, "03:2E:10:15:57:F3 (Q34B)"), -1 with none. */
+int pad_paired(char *name, size_t size);
+
+/* Forgets the paired gamepads; 0 when done. */
+int pad_unpair(void);
+
+/*
+ * What the image lacks for a BLE gamepad: NULL with nothing, else "no_ble" (no BlueZ),
+ * "no_uhid" (no uhid module) or "no_hog" (bluetoothd without its HoG plugin).
+ */
+const char *pad_missing(void);
 
 #endif
